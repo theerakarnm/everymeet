@@ -1,0 +1,18 @@
+services:
+  meeting-bot:
+    build: .
+    container_name: meeting-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+    volumes:
+      # Keeps in-progress recordings so a restart can recover them.
+      - meeting-data:/data
+    ports:
+      - "127.0.0.1:8787:8787" # Nginx in front terminates HTTPS
+    # Give /end-on-shutdown time to flush the last segment to R2.
+    stop_grace_period: 60s
+
+volumes:
+  meeting-data:

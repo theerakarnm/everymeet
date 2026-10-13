@@ -1,0 +1,79 @@
+const esc = (s: string) =>
+  s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
+
+const STYLE = `
+:root{--bg:#f6f5f2;--card:#fff;--text:#1c1b19;--muted:#6b6862;--line:#e4e1da;--accent:#4b54d8;--accent-ink:#fff;--err:#b4232f}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1d1b;--text:#f1efe9;--muted:#a3a097;--line:#33312d;--accent:#8e95ff;--accent-ink:#141413;--err:#ff7b86}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-family:"IBM Plex Sans Thai","Noto Sans Thai",system-ui,sans-serif;line-height:1.55}
+main{max-width:560px;margin:0 auto;padding:48px 16px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px}
+.eyebrow{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0 0 6px}
+h1{font-size:24px;margin:0 0 4px;word-break:break-word}
+.meta{color:var(--muted);font-size:14px;margin:0 0 24px}
+label{display:block;font-size:14px;margin-bottom:8px}
+input{width:100%;font:inherit;font-size:28px;letter-spacing:.4em;text-align:center;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text)}
+input:focus{outline:2px solid var(--accent);outline-offset:1px}
+button{margin-top:16px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+.err{color:var(--err);font-size:14px;margin:12px 0 0}
+audio{width:100%;margin:8px 0 20px}
+h2{font-size:15px;margin:24px 0 8px}
+ul{list-style:none;padding:0;margin:0;border-top:1px solid var(--line)}
+li{border-bottom:1px solid var(--line)}
+li a{display:flex;justify-content:space-between;gap:12px;padding:12px 2px;color:var(--text);text-decoration:none}
+li a:hover{color:var(--accent)}
+li span{color:var(--muted);font-size:13px;white-space:nowrap}
+`;
+
+function shell(title: string, body: string): string {
+  return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow"><title>${esc(title)}</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600&display=swap">
+<style>${STYLE}</style></head><body><main>${body}</main></body></html>`;
+}
+
+export const page = {
+  notFound: () =>
+    shell(
+      "ไม่พบการประชุม",
+      `<div class="card"><p class="eyebrow">Meeting minutes</p><h1>ไม่พบการประชุมนี้</h1><p class="meta">ลิงก์อาจไม่ถูกต้อง หรือการประชุมยังประมวลผลไม่เสร็จ</p></div>`,
+    ),
+
+  pin: (o: { id: string; title: string; error?: string }) =>
+    shell(
+      "ใส่ PIN",
+      `<div class="card"><p class="eyebrow">บันทึกการประชุม</p><h1>${esc(o.title)}</h1>
+<p class="meta">ใส่ PIN 6 หลักที่บอทส่งไว้ในข้อความ Discord</p>
+<form method="post" action="/m/${esc(o.id)}" autocomplete="off">
+<label for="pin">PIN</label>
+<input id="pin" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus>
+${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
+<button type="submit">เปิดบันทึก</button></form></div>`,
+    ),
+
+  player: (o: {
+    id: string;
+    title: string;
+    guild: string;
+    started: string;
+    duration: string;
+    tracks: { userId: string; name: string }[];
+  }) => {
+    const base = `/m/${esc(o.id)}/file`;
+    const tracks = o.tracks
+      .map((t) => `<li><a href="${base}/track/${esc(t.userId)}">${esc(t.name)}<span>.ogg</span></a></li>`)
+      .join("");
+    return shell(
+      `บันทึกการประชุม - ${o.title}`,
+      `<div class="card"><p class="eyebrow">${esc(o.guild)}</p><h1>${esc(o.title)}</h1>
+<p class="meta">${esc(o.started)} · ${esc(o.duration)}</p>
+<audio controls preload="metadata" src="${base}/audio"></audio>
+<h2>ดาวน์โหลด</h2><ul>
+<li><a href="${base}/audio?download=1">เสียงการประชุม (รวมทุกคน)<span>.mp3</span></a></li>
+<li><a href="${base}/summary">สรุปฉบับเต็ม<span>.md</span></a></li>
+<li><a href="${base}/transcript">Transcript ทั้งหมด<span>.txt</span></a></li>
+</ul>
+${tracks ? `<h2>เสียงแยกรายคน</h2><ul>${tracks}</ul>` : ""}</div>`,
+    );
+  },
+};
