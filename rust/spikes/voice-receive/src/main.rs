@@ -39,30 +39,66 @@ const SAMPLES_PER_MS: u64 = 24;
 
 // --- pure timeline logic (unit-tested below) ---
 
-/// Place the write cursor before appending a received packet: never move
-/// backwards, and after any interruption snap forward to the wall-clock
-/// sample position so gaps stay in the timeline (like `TrackWriter`).
-fn place_cursor(cursor: u64, elapsed_ms: u64) -> u64 {
-    cursor.max(elapsed_ms * SAMPLES_PER_MS)
+/// The pure per-speaker state the write decision depends on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WriteState {
+    /// Next sample position to write at (24 kHz samples, not bytes).
+    cursor: u64,
+    /// Start time (ms) of the last written packet; `None` before the first.
+    last_packet_ms: Option<u64>,
 }
 
-/// Update the running maximum gap (ms) between consecutive packets and the
-/// last-seen packet time. The first packet has no gap; late timestamps
-/// never underflow.
+/// One planned write: where the payload lands and where the cursor ends up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct WritePlan {
+    /// Sample offset to write the payload at.
+    write_at: u64,
+    /// Cursor value after appending the payload.
+    new_cursor: u64,
+}
+
+/// A silence longer than this (ms) ends an utterance; the next written
+/// packet starts a new one and snaps the cursor to the wall clock.
+const UTTERANCE_GAP_MS: u64 = 1000;
+
+/// The single write decision for one VoiceTick entry.
+///
+/// Returns `None` when the tick carries no real RTP packet (songbird hands
+/// out a concealment frame, `packet: None`) or no decoded samples, so a lost
+/// or empty tick never touches the timeline. At an utterance start (the
+/// first written packet, or more than `UTTERANCE_GAP_MS` since the last one)
+/// the payload lands at `max(cursor, elapsed_ms * SAMPLES_PER_MS)` so
+/// silence stays in the timeline, like `TrackWriter`; inside an utterance it
+/// appends contiguously at the cursor.
+fn plan_write(
+    state: WriteState,
+    packet_present: bool,
+    pcm_len: usize,
+    now_ms: u64,
+) -> Option<WritePlan> {
+    if !packet_present || pcm_len == 0 {
+        return None;
+    }
+    let utterance_start = state
+        .last_packet_ms
+        .is_none_or(|prev| now_ms.saturating_sub(prev) > UTTERANCE_GAP_MS);
+    let write_at = if utterance_start {
+        state.cursor.max(now_ms * SAMPLES_PER_MS)
+    } else {
+        state.cursor
+    };
+    Some(WritePlan {
+        write_at,
+        new_cursor: write_at + pcm_len as u64,
+    })
+}
+
+/// Update the running maximum gap (ms) between consecutive written packets
+/// and the last-seen packet time. The first packet has no gap; late
+/// timestamps never underflow.
 fn update_gap(max_gap_ms: u64, last_packet_ms: Option<u64>, now_ms: u64) -> (u64, u64) {
     let gap_ms = last_packet_ms.map_or(0, |prev| now_ms.saturating_sub(prev));
     (max_gap_ms.max(gap_ms), now_ms)
-}
-
-/// Only a tick carrying a real RTP packet advances the timeline; a
-/// lost-packet concealment tick (`packet: None`) leaves the cursor where it
-/// was, no matter how many decoded samples it carries.
-fn advance_cursor(cursor: u64, packet_present: bool, decoded_samples: usize) -> u64 {
-    if packet_present {
-        cursor + decoded_samples as u64
-    } else {
-        cursor
-    }
 }
 
 // --- receive state ---
@@ -140,31 +176,37 @@ impl SongbirdEventHandler for RxHandle {
                     };
                     let entry = out.entry(user_id).or_insert_with(|| UserOut::open(user_id));
 
-                    if data.packet.is_some() {
-                        let Some(pcm) = &data.decoded_voice else {
-                            continue;
-                        };
-                        let (max_gap_ms, last_packet_ms) =
-                            update_gap(entry.max_gap_ms, entry.last_packet_ms, now_ms);
-                        entry.max_gap_ms = max_gap_ms;
-                        entry.last_packet_ms = Some(last_packet_ms);
-                        if entry.first_packet_ms.is_none() {
-                            entry.first_packet_ms = Some(now_ms);
-                        }
-                        let cursor = place_cursor(entry.cursor, now_ms);
-                        let bytes: Vec<u8> = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
-                        entry
-                            .file
-                            .write_all_at(&bytes, cursor * 2)
-                            .expect("write pcm");
-                        entry.cursor = advance_cursor(cursor, true, pcm.len());
-                        entry.samples += pcm.len() as u64;
-                        entry.max_samples_per_tick = entry.max_samples_per_tick.max(pcm.len());
-                    } else {
+                    let state = WriteState {
+                        cursor: entry.cursor,
+                        last_packet_ms: entry.last_packet_ms,
+                    };
+                    let pcm_len = data.decoded_voice.as_ref().map_or(0, |p| p.len());
+                    let Some(plan) = plan_write(state, data.packet.is_some(), pcm_len, now_ms)
+                    else {
                         // Lost packet: songbird hands out a concealment frame
                         // (~80 ms at mono 24 kHz). Count it, never write it.
                         entry.plc_ticks += 1;
+                        continue;
+                    };
+                    let pcm = data
+                        .decoded_voice
+                        .as_deref()
+                        .expect("plan_write returned Some only for non-empty pcm");
+                    let (max_gap_ms, last_packet_ms) =
+                        update_gap(entry.max_gap_ms, entry.last_packet_ms, now_ms);
+                    entry.max_gap_ms = max_gap_ms;
+                    entry.last_packet_ms = Some(last_packet_ms);
+                    if entry.first_packet_ms.is_none() {
+                        entry.first_packet_ms = Some(now_ms);
                     }
+                    let bytes: Vec<u8> = pcm.iter().flat_map(|s| s.to_le_bytes()).collect();
+                    entry
+                        .file
+                        .write_all_at(&bytes, plan.write_at * 2)
+                        .expect("write pcm");
+                    entry.cursor = plan.new_cursor;
+                    entry.samples += pcm.len() as u64;
+                    entry.max_samples_per_tick = entry.max_samples_per_tick.max(pcm.len());
                 }
             }
             _ => {}
@@ -278,12 +320,68 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
 
+    /// 20 ms of mono 24 kHz audio, one typical Opus packet.
+    const REAL_PACKET_LEN: usize = 480;
+
+    fn state(cursor: u64, last_packet_ms: Option<u64>) -> WriteState {
+        WriteState {
+            cursor,
+            last_packet_ms,
+        }
+    }
+
     #[test]
-    fn cursor_is_max_of_stored_position_and_wall_clock() {
-        // Continuous speech: the received-sample cursor stays ahead of wall clock.
-        assert_eq!(place_cursor(1_000, 40), 1_000); // 40 ms = 960 samples < 1000
-        // After silence the cursor snaps forward to the wall-clock position.
-        assert_eq!(place_cursor(1_000, 100), 2_400); // 100 ms = 2400 samples
+    fn lost_packet_tick_plans_no_write() {
+        // A scripted tick with packet: None and 1920 decoded (concealment)
+        // samples must not touch the timeline.
+        assert_eq!(
+            plan_write(state(48_000, Some(1_000)), false, 1920, 1_020),
+            None
+        );
+    }
+
+    #[test]
+    fn empty_pcm_plans_no_write() {
+        // A received packet with no decoded samples is never written.
+        assert_eq!(plan_write(state(48_000, Some(1_000)), true, 0, 1_020), None);
+    }
+
+    #[test]
+    fn first_packet_starts_utterance_at_wall_clock() {
+        let plan = plan_write(state(0, None), true, REAL_PACKET_LEN, 200)
+            .expect("first packet plans a write");
+        assert_eq!(plan.write_at, 200 * SAMPLES_PER_MS);
+        assert_eq!(plan.new_cursor, plan.write_at + REAL_PACKET_LEN as u64);
+    }
+
+    #[test]
+    fn new_utterance_snaps_cursor_to_wall_clock() {
+        // More than UTTERANCE_GAP_MS since the last written packet: the
+        // cursor snaps forward past its stale position.
+        let plan = plan_write(state(1_000, Some(0)), true, REAL_PACKET_LEN, 5_000)
+            .expect("packet after silence plans a write");
+        assert_eq!(plan.write_at, 5_000 * SAMPLES_PER_MS);
+        assert_eq!(plan.new_cursor, plan.write_at + REAL_PACKET_LEN as u64);
+    }
+
+    #[test]
+    fn inside_utterance_appends_contiguously() {
+        // 5 ms after the previous packet with the cursor a few samples
+        // behind the wall clock: the payload appends at the cursor, it does
+        // not re-snap to the wall clock.
+        let plan = plan_write(state(24_400, Some(1_015)), true, REAL_PACKET_LEN, 1_020)
+            .expect("packet inside an utterance plans a write");
+        assert_eq!(plan.write_at, 24_400);
+        assert_eq!(plan.new_cursor, 24_880);
+    }
+
+    #[test]
+    fn silence_of_exactly_the_gap_threshold_appends() {
+        // The utterance rule is strictly `> UTTERANCE_GAP_MS`: 1000 ms of
+        // silence is still inside the utterance.
+        let plan = plan_write(state(10_000, Some(0)), true, REAL_PACKET_LEN, 1_000)
+            .expect("write planned");
+        assert_eq!(plan.write_at, 10_000);
     }
 
     #[test]
@@ -294,15 +392,5 @@ mod tests {
         assert_eq!(update_gap(0, Some(500), 700), (200, 700));
         // A shorter gap never lowers the max; late timestamps never underflow.
         assert_eq!(update_gap(400, Some(700), 500), (400, 500));
-    }
-
-    #[test]
-    fn lost_packet_tick_never_moves_the_cursor() {
-        // A scripted tick with packet: None and 1920 decoded (concealment)
-        // samples must not advance the timeline.
-        let cursor = 48_000;
-        assert_eq!(advance_cursor(cursor, false, 1920), cursor);
-        // A real packet advances it by exactly the decoded sample count.
-        assert_eq!(advance_cursor(cursor, true, 1_920), 49_920);
     }
 }
