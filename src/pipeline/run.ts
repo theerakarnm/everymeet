@@ -111,10 +111,6 @@ async function run(client: Client, m: Manifest): Promise<void> {
   }
 }
 
-/**
- * After a crash or restart: meetings that were still recording are closed at
- * their last heartbeat and processed; meetings that were mid-processing are retried.
- */
 /** Close a crashed recording at its last heartbeat; pure manifest edit, no I/O. */
 export function closeAtHeartbeat(m: Manifest): Manifest {
   m.endedAt = m.heartbeatAt;
@@ -130,6 +126,10 @@ export function closeAtHeartbeat(m: Manifest): Manifest {
   return m;
 }
 
+/**
+ * After a crash or restart: meetings that were still recording are closed at
+ * their last heartbeat and processed; meetings that were mid-processing are retried.
+ */
 export async function recoverUnfinished(client: Client): Promise<void> {
   for (const m of unfinishedLocal()) {
     if (m.status === "recording") {

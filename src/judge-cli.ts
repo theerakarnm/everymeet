@@ -6,6 +6,7 @@
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "./config.js";
+import { SESSION_ID_RE } from "./util/pin.js";
 import { loadLocal, saveEverywhere } from "./storage/manifest.js";
 import { buildMinutesMessage } from "./pipeline/publish.js";
 import { runPipeline } from "./pipeline/run.js";
@@ -18,6 +19,11 @@ if (cmd !== "process" || !meetingId) {
   log.error("usage: node --import tsx src/judge-cli.ts process <meetingId>");
   process.exit(2);
 }
+if (!SESSION_ID_RE.test(meetingId)) {
+  log.error(`invalid meeting id: ${meetingId}`);
+  process.exit(2);
+}
+
 const pin = process.env.JUDGE_PIN ?? "";
 if (!/^\d{6}$/.test(pin)) {
   log.error("JUDGE_PIN must be a 6-digit PIN");
