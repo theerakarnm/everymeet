@@ -319,11 +319,11 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 **Gotcha:** `publishMinutes` must keep identical Discord output; `buildMinutesMessage` is a pure refactor. The embed footer text is sliced to 2048 and fields to 1024 inside the builder.
 
 **Steps:**
-- [ ] Step 1: Extract `buildMinutesMessage` from `publishMinutes` (`src/pipeline/publish.ts:48-91`), then have `publishMinutes` convert the plain JSON to `EmbedBuilder`/`ButtonBuilder`/`AttachmentBuilder` and send.
-- [ ] Step 2: Write `src/judge-cli.ts`. Reuse `run()` logic by exporting a `runPipeline(m, pin)` from `src/pipeline/run.ts` that returns `{ lines, shortSummary, fullSummary, transcript, notes }` and is called by both `run()` and the CLI (anchor: `async function run`). Do not duplicate the pipeline body.
-- [ ] Step 3: Add a unit test `src/pipeline/publish.test.ts` that asserts `buildMinutesMessage` for a fixed manifest returns the exact title `สรุปการประชุม - daily-standup`, field names `เริ่มประชุม`, `ระยะเวลา`, `ผู้พูด`, and the file names `summary-full-2026-10-12.md` and `transcript-2026-10-12.txt`.
-- [ ] Step 4: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: 0 type errors, 0 fail, and at least 32 pass (31 baseline plus the new `publish.test.ts`).
-- [ ] Step 5: Commit - `git add src/pipeline/publish.ts src/pipeline/run.ts src/pipeline/publish.test.ts src/judge-cli.ts && git commit -m "split publish message builder and add judge-cli"` (`src/judge-*.ts` compile into `dist/` and ship in the Node image until Task 18 deletes them; accepted)
+- [x] Step 1: Extract `buildMinutesMessage` from `publishMinutes` (`src/pipeline/publish.ts:48-91`), then have `publishMinutes` convert the plain JSON to `EmbedBuilder`/`ButtonBuilder`/`AttachmentBuilder` and send.
+- [x] Step 2: Write `src/judge-cli.ts`. Reuse `run()` logic by exporting a `runPipeline(m, pin)` from `src/pipeline/run.ts` that returns `{ lines, shortSummary, fullSummary, transcript, notes }` and is called by both `run()` and the CLI (anchor: `async function run`). Do not duplicate the pipeline body.
+- [x] Step 3: Add a unit test `src/pipeline/publish.test.ts` that asserts `buildMinutesMessage` for a fixed manifest returns the exact title `สรุปการประชุม - daily-standup`, field names `เริ่มประชุม`, `ระยะเวลา`, `ผู้พูด`, and the file names `summary-full-2026-10-12.md` and `transcript-2026-10-12.txt`.
+- [x] Step 4: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: 0 type errors, 0 fail, and at least 32 pass (31 baseline plus the new `publish.test.ts`).
+- [x] Step 5: Commit - `git add src/pipeline/publish.ts src/pipeline/run.ts src/pipeline/publish.test.ts src/judge-cli.ts && git commit -m "split publish message builder and add judge-cli"` (`src/judge-*.ts` compile into `dist/` and ship in the Node image until Task 18 deletes them; accepted)
 
 ---
 
