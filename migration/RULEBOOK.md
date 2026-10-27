@@ -1,13 +1,10 @@
 # Translation Rulebook - TypeScript to Rust
 
-> **The meta-rule: if two agents could answer a question differently, the
-> answer goes in this file.** This document is read by every implementer,
-> reviewer, and fixer before they touch code. It is read-only inside any loop -
-> amendments are queued for the human and applied between batches.
+> **The meta-rule: if two agents could answer a question differently, the answer goes in this file.**
+> This document is read by every implementer, reviewer, and fixer before they touch code.
+> It is read-only inside any loop - amendments are queued for the human and applied between batches.
 >
-> For a filled-in example at production scale, see Bun's
-> [PORTING.md](https://github.com/oven-sh/bun/commit/46d3bc29f270fa881dd5730ef1549e88407701a5)
-> (576 lines, Zig→Rust) - the shape below is that document, generalized.
+> For a filled-in example at production scale, see Bun's [PORTING.md](https://github.com/oven-sh/bun/commit/46d3bc29f270fa881dd5730ef1549e88407701a5) (576 lines, Zig→Rust) - the shape below is that document, generalized.
 
 Read this whole document before writing any code.
 
@@ -47,10 +44,8 @@ Decide once, here, which are adopted and which are banned - or every agent decid
 
 ## 2. Constructs with no equivalent - one canonical mapping each
 
-Every source construct the target lacks gets exactly one translation, listed
-here. An implementer who invents a second mapping for a listed construct is
-violating a rule; a reviewer who sees an unlisted construct flags it for this
-table.
+Every source construct the target lacks gets exactly one translation, listed here.
+An implementer who invents a second mapping for a listed construct is violating a rule; a reviewer who sees an unlisted construct flags it for this table.
 
 | Source construct | Rust translation |
 |---|---|
@@ -78,16 +73,15 @@ Each row names its Rust translation from the constructs table above.
 | `any` JSON from OpenRouter | `serde_json::Value` at the boundary, then typed `#[serde(rename_all = "camelCase")]` structs before use |
 | `Buffer` PCM slices | `&[u8]` / `Vec<u8>` of little-endian `i16` samples (`i16::to_le_bytes` / `i16::from_le_bytes`) |
 
-**The BUG rule:** when the source's behavior is itself defective (malformed
-output, crash), reproduce it bug-for-bug and mark the site `BUG(port):` with a
-repro - behavior matching asserts the defective output; fixes ship
-only in a flagged post-parity change. The port's job is fidelity; improvement
-is a separate, reviewable commit.
+**The BUG rule:** when the source's behavior is itself defective (malformed output, crash), reproduce it bug-for-bug and mark the site `BUG(port):` with a repro - behavior matching asserts the defective output; fixes ship only in a flagged post-parity change.
+The port's job is fidelity; improvement is a separate, reviewable commit.
 
-**The UNKNOWN rule:** when neither this table nor the gap list decides a
-case, translate to the most conservative representation the target offers,
-mark it `TODO(port):` with the open question, and keep moving. UNKNOWN is an
-answer; a stalled batch is not.
+**The file-name rule:** attachment and download file names use the UTC date (`new Date(startedAt).toISOString().slice(0,10)`, `src/pipeline/publish.ts:75`, `src/web/server.ts:153`), NOT the Bangkok date.
+Port as is and mark the site `BUG(port):`.
+The judge fixture starts at 17:30 UTC so the two dates differ.
+
+**The UNKNOWN rule:** when neither this table nor the gap list decides a case, translate to the most conservative representation the target offers, mark it `TODO(port):` with the open question, and keep moving.
+UNKNOWN is an answer; a stalled batch is not.
 
 **The utterance rule:** write `decoded_voice` ONLY on ticks where `data.packet.is_some()` and the PCM is non-empty.
 Songbird's loss concealment is wrong for mono 24 kHz (`songbird-0.6.1/src/driver/tasks/ssrc_state.rs:111-118` allocates a stereo 1920-sample frame, so one lost or DAVE-dropped packet yields 80 ms instead of 20 ms; verified in a scratch crate), and Node writes only received packets (`src/recorder/session.ts:194-205`).
@@ -101,20 +95,16 @@ This replaces `EndBehaviorType.AfterSilence, duration: 1000` (`src/recorder/sess
 
 ## 3. The sanctioned escape hatch
 
-Translations that can't be expressed safely get exactly one pressure valve,
-used visibly:
+Translations that can't be expressed safely get exactly one pressure valve, used visibly:
 
-- Rust is safe by default: no `unsafe` in `rust/src`.
-  The one platform-specific construct, `std::os::unix::fs::FileExt::write_at` (§2), is safe and needs no escape hatch.
-- Every deferred decision carries a greppable marker: `TODO(port):`,
-  `PERF(port):`, `BUG(port):`.
-  These markers are the queue for later steps - the format is load-bearing,
-  do not vary it.
+- The one platform-specific construct, `std::os::unix::fs::FileExt::write_at` (§2), is safe and needs no escape hatch.
+- Every deferred decision carries a greppable marker: `TODO(port):`, `PERF(port):`, `BUG(port):`.
+  These markers are the queue for later steps - the format is load-bearing, do not vary it.
 
 ## 4. Naming and output paths
 
-Done-ness is detected by output files existing on disk, so these rules are
-what make the whole run resumable. They are not style preferences.
+Done-ness is detected by output files existing on disk, so these rules are what make the whole run resumable.
+They are not style preferences.
 
 - Source `src/<area>/<file>.ts` maps one-to-one to target `rust/src/<area>/<file>.rs`.
   The areas are `recorder`, `pipeline`, `storage`, `web`, `util`.
@@ -127,11 +117,10 @@ what make the whole run resumable. They are not style preferences.
 
 ## 5. Deviation log
 
-Every departure from the documented process gets one line here - skipped
-passes, waived checks, untriggered defaults. ID'd `DEV-001` style: ID, date,
-what was skipped or waived, who sanctioned it. Written at gates, by the
-human or with the human's sign-off. A deviation nobody logged is a deviation
-nobody approved.
+Every departure from the documented process gets one line here - skipped passes, waived checks, untriggered defaults.
+ID'd `DEV-001` style: ID, date, what was skipped or waived, who sanctioned it.
+Written at gates, by the human or with the human's sign-off.
+A deviation nobody logged is a deviation nobody approved.
 
 | ID | Date | Deviation | Sanctioned by |
 |---|---|---|---|
