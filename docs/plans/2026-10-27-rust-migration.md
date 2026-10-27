@@ -200,8 +200,10 @@ If it fails, STOP the plan, report which check failed, and do not start Task 2.
 - [x] Step 3: Verify - Run: `cd rust/spikes/voice-receive && cargo build` - Expected: exit 0 (fix API drift here).
 - [x] Step 4: Add unit tests in the same file for the pure part (cursor placement `max(cursor, elapsed_ms*24)`, gap computation, and a scripted tick with `packet: None` and 1920 decoded samples that must not move the cursor) and Verify - Run: `cargo test` - Expected: 3 pass, 0 fail. This is the non-Discord proxy for the Human box below.
 - [ ] Step 5: 👤 Verify - Human: with a throwaway bot in a throwaway guild, run `SPIKE_SECONDS=180 cargo run`. Person A speaks for 20 s, then Person B joins the channel and speaks for 20 s, then both speak over each other for 20 s. Expected: two `pcm` files in `spike-out/`, each playable (`ffmpeg -f s16le -ar 24000 -ac 1 -i spike-out/<id>.pcm out.wav`) with intelligible speech from the right person, the log line shows `max_gap_ms` under 400 during continuous speech, `max_samples_per_tick` is never above 480 (a larger value means concealment frames leaked into the timeline), and no stall after Person B joined. Proxy: Step 4 asserts the cursor math and the lost-packet rule and Step 3 proves the receive handler compiles against the real crate API.
-- [ ] Step 6: Write `rust/spikes/README.md` with crate versions from `Cargo.lock`, the date, the three answers (a)(b)(c), and PASS or FAIL. FAIL if (b) decoded 24 kHz mono PCM is not delivered under DAVE (then Task 15 needs a different decode path, re-plan) or (c) receive stalls.
-- [ ] Step 7: Commit - `git add .gitignore rust/spikes/README.md rust/spikes/voice-receive/Cargo.toml rust/spikes/voice-receive/Cargo.lock rust/spikes/voice-receive/src && git commit -m "spike: verify songbird voice receive under DAVE"`
+      > Awaiting human: two-person run for (c). One-person run done 2026-10-27: (a) and (b) PASS, see rust/spikes/README.md.
+      > Deviation: Steps 6-7 done by the orchestrator inline (docs only, data from the live run).
+- [x] Step 6: Write `rust/spikes/README.md` with crate versions from `Cargo.lock`, the date, the three answers (a)(b)(c), and PASS or FAIL. FAIL if (b) decoded 24 kHz mono PCM is not delivered under DAVE (then Task 15 needs a different decode path, re-plan) or (c) receive stalls.
+- [x] Step 7: Commit - `git add .gitignore rust/spikes/README.md rust/spikes/voice-receive/Cargo.toml rust/spikes/voice-receive/Cargo.lock rust/spikes/voice-receive/src && git commit -m "spike: verify songbird voice receive under DAVE"`
 
 ---
 
