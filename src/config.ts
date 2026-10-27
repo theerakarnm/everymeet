@@ -15,8 +15,11 @@ const schema = z.object({
   R2_ACCESS_KEY_ID: z.string().min(1),
   R2_SECRET_ACCESS_KEY: z.string().min(1),
   R2_BUCKET: z.string().min(1),
+  /** Optional S3 endpoint override (tests, local fakes). Default is the R2 account endpoint. */
+  R2_ENDPOINT: z.url().optional(),
 
   OPENROUTER_API_KEY: z.string().min(1),
+  OPENROUTER_BASE_URL: z.url().default("https://openrouter.ai/api/v1"),
   TRANSCRIBE_MODEL_PRIMARY: z.string().default("microsoft/mai-transcribe-2"),
   TRANSCRIBE_MODEL_FALLBACK: z.string().default("google/gemini-3.5-transcribe"),
   SUMMARY_MODEL_PRIMARY: z.string().default("anthropic/claude-sonnet-5.5"),

@@ -281,7 +281,7 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 - Produces: optional env `R2_ENDPOINT` (full URL, default `https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com`), optional env `OPENROUTER_BASE_URL` (default `https://openrouter.ai/api/v1`). When `R2_ENDPOINT` is set, S3 client uses `forcePathStyle: true`.
 
 **Steps:**
-- [ ] Step 1: In `src/config.ts` add after `R2_BUCKET`:
+- [x] Step 1: In `src/config.ts` add after `R2_BUCKET`:
       ```ts
       /** Optional S3 endpoint override (tests, local fakes). Default is the R2 account endpoint. */
       R2_ENDPOINT: z.url().optional(),
@@ -290,15 +290,15 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
       ```ts
       OPENROUTER_BASE_URL: z.url().default("https://openrouter.ai/api/v1"),
       ```
-- [ ] Step 2: In `src/storage/r2.ts` replace the `endpoint:` line and add path style:
+- [x] Step 2: In `src/storage/r2.ts` replace the `endpoint:` line and add path style:
       ```ts
       endpoint: c.R2_ENDPOINT ?? `https://${c.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
       forcePathStyle: !!c.R2_ENDPOINT,
       ```
-- [ ] Step 3: In `src/pipeline/openrouter.ts` delete `const BASE = ...` and use `` `${config().OPENROUTER_BASE_URL}${path}` `` inside `post()` (anchor: `await fetch(\`${BASE}${path}\``). Note the test helper strips `/api/v1` from the path (`src/test/setup.ts`, `mockOpenRouter`); the default keeps that working.
-- [ ] Step 4: Add both variables, commented with defaults, to `.env.example`. Also blank the real-looking `R2_ACCOUNT_ID=` value there (it is a committed account identifier).
-- [ ] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: 0 type errors, 31 pass, 0 fail.
-- [ ] Step 6: Commit - `git add src/config.ts src/storage/r2.ts src/pipeline/openrouter.ts .env.example && git commit -m "add R2_ENDPOINT and OPENROUTER_BASE_URL overrides"`
+- [x] Step 3: In `src/pipeline/openrouter.ts` delete `const BASE = ...` and use `` `${config().OPENROUTER_BASE_URL}${path}` `` inside `post()` (anchor: `await fetch(\`${BASE}${path}\``). Note the test helper strips `/api/v1` from the path (`src/test/setup.ts`, `mockOpenRouter`); the default keeps that working.
+- [x] Step 4: Add both variables, commented with defaults, to `.env.example`. Also blank the real-looking `R2_ACCOUNT_ID=` value there (it is a committed account identifier).
+- [x] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: 0 type errors, 31 pass, 0 fail.
+- [x] Step 6: Commit - `git add src/config.ts src/storage/r2.ts src/pipeline/openrouter.ts .env.example && git commit -m "add R2_ENDPOINT and OPENROUTER_BASE_URL overrides"`
 
 ---
 

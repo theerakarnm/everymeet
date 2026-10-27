@@ -3,7 +3,6 @@ import { sleep } from "../util/time.js";
 import { logger } from "../util/log.js";
 
 const log = logger("openrouter");
-const BASE = "https://openrouter.ai/api/v1";
 
 export class HttpError extends Error {
   constructor(
@@ -34,7 +33,7 @@ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): 
 }
 
 async function post(path: string, body: unknown, timeoutMs: number): Promise<any> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${config().OPENROUTER_BASE_URL}${path}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${config().OPENROUTER_API_KEY}`,

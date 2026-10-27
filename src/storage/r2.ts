@@ -12,7 +12,8 @@ function s3(): S3Client {
     const c = config();
     client = new S3Client({
       region: "auto",
-      endpoint: `https://${c.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      endpoint: c.R2_ENDPOINT ?? `https://${c.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      forcePathStyle: !!c.R2_ENDPOINT,
       credentials: { accessKeyId: c.R2_ACCESS_KEY_ID, secretAccessKey: c.R2_SECRET_ACCESS_KEY },
     });
   }
