@@ -202,6 +202,7 @@ If it fails, STOP the plan, report which check failed, and do not start Task 2.
 - [ ] Step 5: 👤 Verify - Human: with a throwaway bot in a throwaway guild, run `SPIKE_SECONDS=180 cargo run`. Person A speaks for 20 s, then Person B joins the channel and speaks for 20 s, then both speak over each other for 20 s. Expected: two `pcm` files in `spike-out/`, each playable (`ffmpeg -f s16le -ar 24000 -ac 1 -i spike-out/<id>.pcm out.wav`) with intelligible speech from the right person, the log line shows `max_gap_ms` under 400 during continuous speech, `max_samples_per_tick` is never above 480 (a larger value means concealment frames leaked into the timeline), and no stall after Person B joined. Proxy: Step 4 asserts the cursor math and the lost-packet rule and Step 3 proves the receive handler compiles against the real crate API.
       > Awaiting human: two-person run for (c). One-person run done 2026-10-27: (a) and (b) PASS, see rust/spikes/README.md.
       > Deviation: Steps 6-7 done by the orchestrator inline (docs only, data from the live run).
+      > Deviation: 2026-10-27 the user approved starting Tasks 2-7 before (c) passes, accepting that judge work may be wasted if (c) fails. Task 9 still waits for (c).
 - [x] Step 6: Write `rust/spikes/README.md` with crate versions from `Cargo.lock`, the date, the three answers (a)(b)(c), and PASS or FAIL. FAIL if (b) decoded 24 kHz mono PCM is not delivered under DAVE (then Task 15 needs a different decode path, re-plan) or (c) receive stalls.
 - [x] Step 7: Commit - `git add .gitignore rust/spikes/README.md rust/spikes/voice-receive/Cargo.toml rust/spikes/voice-receive/Cargo.lock rust/spikes/voice-receive/src && git commit -m "spike: verify songbird voice receive under DAVE"`
 
@@ -217,9 +218,9 @@ If it fails, STOP the plan, report which check failed, and do not start Task 2.
 - Produces: the decisions below, which every later task treats as binding.
 
 **Steps:**
-- [ ] Step 1: Copy the template: `cp /tmp/mk/templates/RULEBOOK.md migration/RULEBOOK.md`. If `/tmp/mk` is gone: `git clone --depth 1 https://github.com/anthropics/code-migration-kit-with-claude-code.git /tmp/mk`.
-- [ ] Step 2: Fill §0 (structure-preserving; the compiler is allowed in this repo because `cargo check` is cheap, so replace the "do not run the compiler" bullet with "run `cargo check` per task").
-- [ ] Step 3: Fill §1 with exactly these decisions:
+- [x] Step 1: Copy the template: `cp /tmp/mk/templates/RULEBOOK.md migration/RULEBOOK.md`. If `/tmp/mk` is gone: `git clone --depth 1 https://github.com/anthropics/code-migration-kit-with-claude-code.git /tmp/mk`.
+- [x] Step 2: Fill §0 (structure-preserving; the compiler is allowed in this repo because `cargo check` is cheap, so replace the "do not run the compiler" bullet with "run `cargo check` per task").
+- [x] Step 3: Fill §1 with exactly these decisions:
 
       | Area | Decision |
       |---|---|
@@ -241,7 +242,7 @@ If it fails, STOP the plan, report which check failed, and do not start Task 2.
       | axum routing | axum 0.8 path syntax `/m/{id}`; the old `:id` form panics at router build. |
       | Concurrency limiter | `tokio::sync::Semaphore`, no crate (mirrors `util/limit.ts`). |
 
-- [ ] Step 4: Fill §2 (constructs with no equivalent) with these rows:
+- [x] Step 4: Fill §2 (constructs with no equivalent) with these rows:
 
       | Source construct | Rust translation |
       |---|---|
@@ -254,13 +255,13 @@ If it fails, STOP the plan, report which check failed, and do not start Task 2.
       | `Record<string, Participant>` and `outputs.tracks` | `indexmap::IndexMap<String, _>` (serde feature) with `serde_json` feature `preserve_order`. Insertion order is visible output: it orders `meetingContext` in every chat prompt (`summarize.ts:16-21`), the embed speakers field, the player track list, ffmpeg amix inputs, and transcription jobs. Discord ids are not sorted lexicographically by join order. |
       | `Intl.DateTimeFormat("th-TH", ...)` | hand-written formatter: `D MMM BBBB HH:mm` with Thai short months `ม.ค. ก.พ. มี.ค. เม.ย. พ.ค. มิ.ย. ก.ค. ส.ค. ก.ย. ต.ค. พ.ย. ธ.ค.`, year + 543, 24 h, Asia/Bangkok = UTC+7 with no DST (`chrono` is NOT adopted; use plain arithmetic on epoch ms) |
 
-- [ ] Step 5: Add a short "Gap sites" list to §2 (replaces the kit's separate inventory, which nothing here would check): shared mutable `manifest` mutated from session, uploader, and pipeline; the `activeSessions` global map; timer handles in `MeetingSession`; `participants[userId]!` non-null assertions (`rg -c '\]!' src`); `any` JSON from OpenRouter; `Buffer` PCM slices. Each row names its Rust translation from the table above.
-- [ ] Step 5b: Add the BUG rule, the utterance rule, and the voice rule:
+- [x] Step 5: Add a short "Gap sites" list to §2 (replaces the kit's separate inventory, which nothing here would check): shared mutable `manifest` mutated from session, uploader, and pipeline; the `activeSessions` global map; timer handles in `MeetingSession`; `participants[userId]!` non-null assertions (`rg -c '\]!' src`); `any` JSON from OpenRouter; `Buffer` PCM slices. Each row names its Rust translation from the table above.
+- [x] Step 5b: Add the BUG rule, the utterance rule, and the voice rule:
       - Utterance rule: write `decoded_voice` ONLY on ticks where `data.packet.is_some()` and the PCM is non-empty. Songbird's loss concealment is wrong for mono 24 kHz (`songbird-0.6.1/src/driver/tasks/ssrc_state.rs:111-118` allocates a stereo 1920-sample frame, so one lost or DAVE-dropped packet yields 80 ms instead of 20 ms; verified in a scratch crate), and Node writes only received packets (`src/recorder/session.ts:194-205`). An utterance starts on the first such tick and ends after 1000 ms without one. This replaces `EndBehaviorType.AfterSilence, duration: 1000` (`src/recorder/session.ts:187`). `TrackWriter` semantics (`beginUtterance(expectedSample)`, `max(cursor, expected)`) are unchanged.
       - Voice rule: bots are skipped (`member.user.bot`), `selfDeaf=false`, `selfMute=true`.
       - Order rule: judge comparisons must NOT sort object keys for `participants` and `outputs.tracks`; fixtures use ids whose join order differs from their sorted order.
-- [ ] Step 6: Verify - Run: `grep -nE '\[(source language|target language|e\.g\.|why|path pattern|add rows|your gap|date|who|N|high|Module|Test file|decide|default:|source raises)' migration/RULEBOOK.md | wc -l` - Expected: `0`. Also fill or delete §3-§5 of the template (every section is either filled or removed).
-- [ ] Step 7: Commit - `git add migration/RULEBOOK.md && git commit -m "docs: migration rulebook for TypeScript to Rust"`
+- [x] Step 6: Verify - Run: `grep -nE '\[(source language|target language|e\.g\.|why|path pattern|add rows|your gap|date|who|N|high|Module|Test file|decide|default:|source raises)' migration/RULEBOOK.md | wc -l` - Expected: `0`. Also fill or delete §3-§5 of the template (every section is either filled or removed).
+- [x] Step 7: Commit - `git add migration/RULEBOOK.md && git commit -m "docs: migration rulebook for TypeScript to Rust"`
 
 ---
 
