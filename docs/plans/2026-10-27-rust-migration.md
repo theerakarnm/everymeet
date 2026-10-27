@@ -344,9 +344,9 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
   - `makeMeetingFixture(dataDir: string, s3: { objects: Map<string, Buffer> }): { id: string; manifest: object }` (fixed id `FIXTUREFIXTURE12`, 16 chars; fixed `startedAt` of 2026-12-31T17:30:00Z so the Bangkok date and the UTC date differ) writes a manifest with 2 participants and PCM segments made of 440 Hz and 660 Hz tones (generated in JS, 24 kHz s16le), including one speaker with utterances spanning a segment boundary, a 90 s silence gap, and a 2.5 s same-speaker pause (between `mergeGap` 2 s and 3 s). Participant ids are `900000000000000002` (joins first) and `100000000000000001` (joins second), so join order differs from sorted order. The fixture also seeds the FLAC segments into `s3.objects` and sets `participants[*].uploaded` accordingly (the pipeline does not upload segments; the recorder does; scenario 10 needs `uploaded`, `src/pipeline/assemble.ts:20`).
 
 **Steps:**
-- [ ] Step 1: Implement the three files with `node:http` only. `fake-s3.mjs --serve <port>` runs the fake as a standalone server (used by the End-to-end Manual item).
-- [ ] Step 2: Verify - Run: `node judge/fake-s3.mjs --selftest && node judge/fake-openrouter.mjs --selftest` - Expected: each prints `selftest ok`. The S3 self-test uploads a `createReadStream` through `@aws-sdk/client-s3` (run from the repo root so `node_modules` resolves, `R2_ENDPOINT` style endpoint, `forcePathStyle`) and asserts the stored bytes equal the file; a raw-HTTP PUT self-test is not enough.
-- [ ] Step 3: Commit - `git add judge && git commit -m "judge: fake S3, fake OpenRouter, fixtures"`
+- [x] Step 1: Implement the three files with `node:http` only. `fake-s3.mjs --serve <port>` runs the fake as a standalone server (used by the End-to-end Manual item).
+- [x] Step 2: Verify - Run: `node judge/fake-s3.mjs --selftest && node judge/fake-openrouter.mjs --selftest` - Expected: each prints `selftest ok`. The S3 self-test uploads a `createReadStream` through `@aws-sdk/client-s3` (run from the repo root so `node_modules` resolves, `R2_ENDPOINT` style endpoint, `forcePathStyle`) and asserts the stored bytes equal the file; a raw-HTTP PUT self-test is not enough.
+- [x] Step 3: Commit - `git add judge && git commit -m "judge: fake S3, fake OpenRouter, fixtures"`
 
 ---
 
