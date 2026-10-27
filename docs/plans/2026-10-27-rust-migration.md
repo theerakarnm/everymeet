@@ -384,11 +384,11 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 **Mutations:** Task 7 mutates the Node source with patch files in `judge/mutations/*.patch`; the runner itself has no mutation switch.
 
 **Steps:**
-- [ ] Step 1: Add `src/judge-web.ts` (`import { startWebServer } from "./web/server.js"; startWebServer();`) and extend `src/judge-cli.ts` with the `recover`, `verify-pin`, `sign-access`, `verify-access`, `bangkok`, `duration` subcommands calling the existing functions.
-- [ ] Step 2: Implement the runner and scenarios.
-- [ ] Step 3: Verify - Run: `npm run typecheck && node judge/run.mjs --impl node --record-golden` - Expected: scenarios 1-4 and 6-13 PASS on first run, and `judge/golden/` is created. Scenario 5 is skipped on `--record-golden`.
-- [ ] Step 4: Verify - Run: `node judge/run.mjs --impl node` - Expected: `13/13` PASS twice in a row (determinism).
-- [ ] Step 5: Commit - `git add judge src/judge-web.ts src/judge-cli.ts && git commit -m "judge: portable parity scenarios and goldens from the Node bot"`
+- [x] Step 1: Add `src/judge-web.ts` (`import { startWebServer } from "./web/server.js"; startWebServer();`) and extend `src/judge-cli.ts` with the `recover`, `verify-pin`, `sign-access`, `verify-access`, `bangkok`, `duration` subcommands calling the existing functions.
+- [x] Step 2: Implement the runner and scenarios.
+- [x] Step 3: Verify - Run: `npm run typecheck && node judge/run.mjs --impl node --record-golden` - Expected: scenarios 1-4 and 6-13 PASS on first run, and `judge/golden/` is created. Scenario 5 is skipped on `--record-golden`.
+- [x] Step 4: Verify - Run: `node judge/run.mjs --impl node` - Expected: `13/13` PASS twice in a row (determinism).
+- [x] Step 5: Commit - `git add judge src/judge-web.ts src/judge-cli.ts && git commit -m "judge: portable parity scenarios and goldens from the Node bot"`
 
 ---
 

@@ -1,0 +1,83 @@
+{
+  "id": "FIXTUREFIXTURE12",
+  "guildId": "000000000000000001",
+  "guildName": "daily-standup",
+  "voiceChannelId": "000000000000000002",
+  "voiceChannelName": "ห้องประชุมหลัก",
+  "commandChannelId": "000000000000000003",
+  "startedBy": {
+    "id": "900000000000000002",
+    "name": "สมชาย"
+  },
+  "startedAt": 1798738200000,
+  "endedAt": 1798738800000,
+  "endReason": "ended by สมชาย with /end",
+  "heartbeatAt": 1798738800000,
+  "status": "done",
+  "participants": {
+    "900000000000000002": {
+      "displayName": "สมชาย",
+      "utterances": [
+        {
+          "start": 24000,
+          "end": 144000
+        },
+        {
+          "start": 204000,
+          "end": 312000
+        },
+        {
+          "start": 2472000,
+          "end": 2832000
+        },
+        {
+          "start": 7080000,
+          "end": 7320000
+        }
+      ],
+      "segments": [
+        0,
+        1
+      ],
+      "uploaded": [
+        0,
+        1
+      ]
+    },
+    "100000000000000001": {
+      "displayName": "สมหญิง",
+      "utterances": [
+        {
+          "start": 480000,
+          "end": 1200000
+        },
+        {
+          "start": 9600000,
+          "end": 9960000
+        }
+      ],
+      "segments": [
+        0,
+        1
+      ],
+      "uploaded": [
+        0,
+        1
+      ]
+    }
+  },
+  "outputs": {
+    "tracks": {
+      "900000000000000002": "meetings/FIXTUREFIXTURE12/tracks/900000000000000002.ogg",
+      "100000000000000001": "meetings/FIXTUREFIXTURE12/tracks/100000000000000001.ogg"
+    },
+    "mixed": "meetings/FIXTUREFIXTURE12/meeting.mp3",
+    "transcript": "meetings/FIXTUREFIXTURE12/transcript.txt",
+    "summaryFull": "meetings/FIXTUREFIXTURE12/summary-full.md",
+    "summaryShort": "meetings/FIXTUREFIXTURE12/summary-short.md"
+  },
+  "pin": {
+    "salt": "<salt>",
+    "hash": "<hash>"
+  }
+}

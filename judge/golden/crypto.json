@@ -1,0 +1,17 @@
+{
+  "id": "FIXTUREFIXTURE12",
+  "secret": "judge-session-secret-0123456789abcdef",
+  "pin": {
+    "pin": "123456",
+    "salt": "VveJ_SA7FKRih8NPZMzOBw",
+    "hash": "3WlBgf6fQ-wzo0ajfxmn3wMf6GzffkE8rW1viFDXV0A"
+  },
+  "wrongPin": "654321",
+  "cookie": {
+    "good": "34296793538100.U8KIJQ1d5ILB30ywqx5q6RXYyfZ6-M-aD8vlWBDQ3Io",
+    "expired": "1793113478489.CSBisceyBc7H4TBimqW-WOFhuOIgn8kivAIfhBSM79k",
+    "badExpiry": "12345.U8KIJQ1d5ILB30ywqx5q6RXYyfZ6-M-aD8vlWBDQ3Io",
+    "badBase64": "34296793538100.%%%not-base64",
+    "noDot": "onlyonepart"
+  }
+}
