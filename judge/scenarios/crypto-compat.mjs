@@ -51,6 +51,12 @@ export async function goldenVectors(open) {
     assert.notEqual((await ctx.judgeCli(["verify-access", vectors.id, value, vectors.secret])).code, 0,
       `${name} cookie is rejected`);
   }
+  assert.notEqual((await ctx.judgeCli(["verify-access", "AAAAAAAAAAAAAAAA", vectors.cookie.good, vectors.secret])).code, 0,
+    "a cookie is bound to the meeting it was issued for");
+  assert.notEqual((await ctx.judgeCli(["verify-access", vectors.id, vectors.cookie.good, `${vectors.secret}x`])).code, 0,
+    "a cookie is bound to the signing secret");
+  assert.notEqual((await ctx.judgeCli(["verify-pin", "12ab56", vectors.pin.salt, vectors.pin.hash])).code, 0,
+    "a PIN with non-digits is rejected");
 }
 
 /** 20 fixed instants and 20 fixed durations, including the plan's required edges. */

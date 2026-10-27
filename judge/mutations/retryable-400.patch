@@ -1,0 +1,11 @@
+--- a/src/pipeline/openrouter.ts
++++ b/src/pipeline/openrouter.ts
+@@ -14,7 +14,7 @@
+ }
+ 
+ const retryable = (err: unknown) =>
+-  !(err instanceof HttpError) || err.status === 408 || err.status === 429 || err.status >= 500;
++  !(err instanceof HttpError) || err.status === 400 || err.status === 408 || err.status === 429 || err.status >= 500;
+ 
+ async function withRetry<T>(label: string, fn: () => Promise<T>, attempts = 3): Promise<T> {
+   let lastErr: unknown;

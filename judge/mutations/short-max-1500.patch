@@ -1,0 +1,11 @@
+--- a/src/pipeline/summarize.ts
++++ b/src/pipeline/summarize.ts
+@@ -3,7 +3,7 @@
+ import { chat } from "./openrouter.js";
+ 
+ /** The short summary must stay under 1500 characters. */
+-export const SHORT_MAX = 1499;
++export const SHORT_MAX = 1500;
+ 
+ const SYSTEM = `คุณคือเลขานุการการประชุมมืออาชีพ หน้าที่คือสรุปการประชุมจากบันทึกการถอดเสียง (transcript) เป็นภาษาไทย
+ กฎ:

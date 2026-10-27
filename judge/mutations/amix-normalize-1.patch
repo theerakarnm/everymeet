@@ -1,0 +1,11 @@
+--- a/src/pipeline/assemble.ts
++++ b/src/pipeline/assemble.ts
+@@ -93,7 +93,7 @@
+   } else if (inputs.length === 1) {
+     await ffmpeg([...rawInput(inputs[0]!), ...encode]);
+   } else {
+-    const filter = `amix=inputs=${inputs.length}:duration=longest:normalize=0,alimiter=limit=0.95`;
++    const filter = `amix=inputs=${inputs.length}:duration=longest:normalize=1,alimiter=limit=0.95`;
+     await ffmpeg([...inputs.flatMap(rawInput), "-filter_complex", filter, ...encode]);
+   }
+   return out;

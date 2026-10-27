@@ -1,0 +1,11 @@
+--- a/src/pipeline/plan.ts
++++ b/src/pipeline/plan.ts
+@@ -20,7 +20,7 @@
+ }
+ 
+ export const DEFAULT_PLAN: PlanOptions = {
+-  mergeGap: 2 * SAMPLE_RATE,
++  mergeGap: 3 * SAMPLE_RATE,
+   maxTurn: 60 * SAMPLE_RATE,
+   minTurn: Math.round(0.4 * SAMPLE_RATE),
+   maxChunk: 120 * SAMPLE_RATE,

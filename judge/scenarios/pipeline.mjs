@@ -7,7 +7,7 @@
  */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, scryptSync, timingSafeEqual } from "node:crypto";
 import { join } from "node:path";
 import assert from "node:assert/strict";
 import { FIRST_SPEAKER, SECOND_SPEAKER } from "../fixtures.mjs";
@@ -39,6 +39,21 @@ function expectedR2Keys(id) {
 export function normalizePin(m) {
   if (m?.pin) m.pin = { salt: "<salt>", hash: "<hash>" };
   return m;
+}
+
+/** Same construction as src/util/pin.ts hashPin: Node scrypt defaults, base64url salt/hash. */
+const verifyStoredPin = (pin, salt, hash) => {
+  const got = scryptSync(pin, salt, 32);
+  const want = Buffer.from(hash, "base64url");
+  return got.length === want.length && timingSafeEqual(got, want);
+};
+
+/** The manifest must store a hash the posted PIN satisfies, never the PIN itself. */
+function assertStoredPin(ctx) {
+  const raw = JSON.parse(ctx.s3Text(`meetings/${ctx.id}/manifest.json`));
+  assert.ok(verifyStoredPin(ctx.pin, raw.pin.salt, raw.pin.hash), "the posted PIN verifies against the stored hash");
+  assert.ok(!JSON.stringify(raw).includes(`"${ctx.pin}"`), "the PIN itself is never stored");
+  return raw;
 }
 
 function ffprobeJson(file) {
@@ -120,7 +135,7 @@ export async function happy(open) {
   const transcript = ctx.s3Text(`meetings/${ctx.id}/transcript.txt`);
   const stt = sttMultiset(ctx);
   const chats = chatCalls(ctx).map((c) => ({ model: c.body.model, max_tokens: c.body.max_tokens, messages: c.body.messages }));
-  const manifest = normalizePin(JSON.parse(ctx.s3Text(`meetings/${ctx.id}/manifest.json`)));
+  const manifest = normalizePin(assertStoredPin(ctx));
   const publish = publishOf(ctx);
   const media = probeMedia(ctx);
 
@@ -159,7 +174,7 @@ const assertHappyGoldens = (ctx) => {
     "chat calls differ from golden",
   );
   assert.deepEqual(
-    normalizePin(JSON.parse(ctx.s3Text(`meetings/${ctx.id}/manifest.json`))),
+    normalizePin(assertStoredPin(ctx)),
     JSON.parse(ctx.readGolden("manifest.json")),
     "manifest differs from golden",
   );
@@ -241,6 +256,30 @@ export async function fallback(open) {
   );
   assert.match(publishOf(ctx2).content, /ถอดเสียงไม่สำเร็จ 2 จาก 2 ช่วง/);
   assert.equal(chatCalls(ctx2).length, 2, "summaries still ran");
+
+  // Sub-run 3: both summary models refuse; the CLI fails loudly while the audio
+  // and the transcript stay in R2. (The Discord failure notice itself is
+  // session-level and stays with the ported session tests.)
+  const ctx3 = await open({
+    script: (call) =>
+      call.path.endsWith("/chat/completions")
+        ? { status: 400, body: { error: { message: "judge: every summary model refuses" } } }
+        : undefined,
+  });
+  ctx3.seedFixture();
+  const failed = await ctx3.judgeCli(["process", ctx3.id]);
+  assert.notEqual(failed.code, 0, "total summary failure exits non-zero");
+  assert.match(`${failed.stderr}${failed.stdout}`, /All summary models failed/);
+  const keys3 = [...ctx3.s3objects.keys()].sort();
+  for (const key of [
+    `meetings/${ctx3.id}/meeting.mp3`,
+    `meetings/${ctx3.id}/transcript.txt`,
+    `meetings/${ctx3.id}/tracks/${FIRST_SPEAKER}.ogg`,
+    `meetings/${ctx3.id}/tracks/${SECOND_SPEAKER}.ogg`,
+  ]) {
+    assert.ok(keys3.includes(key), `${key} survives a summary failure`);
+  }
+  assert.ok(!keys3.some((k) => k.includes("summary-")), "no summaries were uploaded");
 }
 
 export async function shortSummaryLimit(open) {

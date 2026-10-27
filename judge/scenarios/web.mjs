@@ -90,6 +90,16 @@ export async function loginAndFiles(open) {
     "attachment; filename*=UTF-8''meeting-2026-12-31.mp3",
     dlLoc.search,
   );
+
+  const unknownTrack = await ctx.get(`/m/${ctx.id}/file/track/someone-else`, { cookie });
+  assert.equal(unknownTrack.status, 404, "a track for a user not in the manifest is not served");
+
+  const otherId = "BBBBAAAAAAAAAAAA";
+  const done = JSON.parse(ctx.s3Text(`meetings/${ctx.id}/manifest.json`));
+  ctx.s3objects.set(`meetings/${otherId}/manifest.json`, Buffer.from(JSON.stringify({ ...done, id: otherId })));
+  const cross = await ctx.get(`/m/${otherId}`, { cookie });
+  assert.equal(cross.status, 200);
+  assert.match(await cross.text(), /name="pin"/, "a cookie only opens the meeting it was issued for");
 }
 
 export async function lockout(open) {

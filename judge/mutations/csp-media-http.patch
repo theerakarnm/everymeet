@@ -1,0 +1,11 @@
+--- a/src/web/server.ts
++++ b/src/web/server.ts
+@@ -91,7 +91,7 @@
+     c.header("Referrer-Policy", "no-referrer");
+     c.header(
+       "Content-Security-Policy",
+-      "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src 'self' https:; form-action 'self'; base-uri 'none'",
++      "default-src 'none'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; media-src 'self' http: https:; form-action 'self'; base-uri 'none'",
+     );
+   });
+ 

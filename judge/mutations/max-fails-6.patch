@@ -1,0 +1,11 @@
+--- a/src/web/server.ts
++++ b/src/web/server.ts
+@@ -13,7 +13,7 @@
+ 
+ const log = logger("web");
+ const ACCESS_TTL_MS = 12 * 60 * 60 * 1000;
+-const MAX_FAILS = 5;
++const MAX_FAILS = 6;
+ const FAIL_WINDOW_MS = 15 * 60 * 1000;
+ 
+ // ---- small caches ----------------------------------------------------------
