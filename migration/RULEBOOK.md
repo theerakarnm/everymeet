@@ -125,3 +125,63 @@ A deviation nobody logged is a deviation nobody approved.
 | ID | Date | Deviation | Sanctioned by |
 |---|---|---|---|
 | DEV-001 | 2026-10-27 | Tasks 2-7 started before Task 1 check (c) (second member joins mid-call, songbird issue 310) passed; Task 9 still waits for (c) | user |
+
+## Rust engineering standard
+
+Source: `migration/rust-best-practices.md` (copied from the user's gist on 2026-10-27).
+It binds Tasks 9-17 with the tailoring below.
+Where it conflicts with the BUG(port) rule, the BUG(port) rule wins: behavior parity with Node comes first.
+
+Adopted as written:
+- Newtypes for domain ids that cross module boundaries: `MeetingId` (validated against `SESSION_ID_RE` in its constructor), `SampleIndex` and `SampleCount` for PCM positions. Discord ids use serenity's `UserId`, `GuildId`, `ChannelId`.
+- Enums instead of boolean flags or sentinel values (for example the meeting `status` and the end reason).
+- `Result` with typed `thiserror` errors per module; `anyhow` only in `main.rs` and `src/bin/*`.
+- No `unwrap()`, `expect()`, `panic!`, `todo!`, `unimplemented!`, `dbg!` outside tests (enforced by lints below).
+- Checked arithmetic at trust boundaries: PCM byte offsets, WAV header sizes, chunk packing, manifest numbers read from R2.
+- Validate external input in all builds; `debug_assert!` only for internal invariants, never with side effects.
+- Bounded work: every queue, retry loop, and concurrent fan-out has an explicit limit taken from config (`TRANSCRIBE_CONCURRENCY`, retry counts as in Node).
+- Borrow instead of clone by default; `Arc` only for state that is truly shared across tasks (`AppState`, the session map).
+- `#![forbid(unsafe_code)]` in the crate.
+- Comments explain why, not what; TODOs name a task or issue.
+
+Tailored for this crate:
+- Memory profile: the whole crate is **allocation-conscious** (an I/O-bound bot whose cost is ffmpeg and remote APIs).
+  The strict-heapless and allocation-free-steady-state profiles, `no_std`, the `disallowed-types` allocation guardrails, and the `no_alloc` counting test do not apply.
+  The voice-receive tick path should still reuse its per-user buffers rather than allocate per tick.
+- `missing_docs` is off: this is an application crate with no public library API.
+- Performance benchmarks are not merge gates; Task 17's resource comparison is the only performance check.
+
+Lint and profile baseline for `rust/Cargo.toml`:
+
+```toml
+[lints.rust]
+unsafe_code = "forbid"
+unused_must_use = "deny"
+
+[lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+dbg_macro = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unwrap_used = "deny"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+
+[profile.release]
+overflow-checks = true
+```
+
+`rust/clippy.toml`: `allow-unwrap-in-tests = true` and `allow-expect-in-tests = true`.
+A local suppression uses `#[expect(lint, reason = "...")]` on the narrowest item.
+
+Required checks for every Rust task commit (run in `rust/`):
+
+```bash
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --locked
+```

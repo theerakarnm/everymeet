@@ -25,6 +25,8 @@
 
 ## Global Constraints
 
+- Rust code (Tasks 9-17) follows the rulebook section "Rust engineering standard" (from `migration/rust-best-practices.md`, tailored there): no `unwrap`/`expect`/`panic!` outside tests, typed `thiserror` errors, newtypes `MeetingId`, `SampleIndex`, `SampleCount`, checked arithmetic at trust boundaries, bounded queues/retries/fan-out, `#![forbid(unsafe_code)]`. Reviewers of Tasks 9-15 check it. Plan reference snippets that break it are corrected under the tool-wins rule.
+
 - Audio format everywhere: 24 kHz mono signed 16-bit LE. `SAMPLE_RATE = 24_000`, `BYTES_PER_SAMPLE = 2`, `SEGMENT_SECONDS = 300` (`src/config.ts:66-71`).
 - R2 key layout is frozen: `meetings/{id}/manifest.json`, `meetings/{id}/segments/{userId}/{0000}.flac`, `tracks/{userId}.ogg`, `meeting.mp3`, `transcript.txt`, `summary-full.md`, `summary-short.md` (`src/storage/r2.ts:22-31`).
 - Manifest JSON stays byte-compatible in field names (camelCase) so the Rust bot can read manifests written by Node and the reverse (`src/storage/manifest.ts:6-50`). Meetings already in R2 must stay playable.
@@ -42,7 +44,7 @@
 - Every fallback model pair (transcribe, summary) keeps working (`AGENTS.md` Gotchas; `src/pipeline/openrouter.ts:94-108, 115-133`).
 - `SESSION_SECRET` min 32 chars; R2 bucket stays private; playback only through presigned URLs.
 - New runtime dependencies need a reason. The adopted Rust crates are listed in the rulebook (Task 2). Anything else needs a rulebook amendment first.
-- Quality gate for the Node side stays `npm run typecheck && npm test`. For the Rust side it is `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` run in `rust/`.
+- Quality gate for the Node side stays `npm run typecheck && npm test`. For the Rust side it is `cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked` run in `rust/`.
 
 ## Patterns to Mirror
 
@@ -414,7 +416,7 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 ### Task 9: Rust scaffold, config, util
 
 **Files:**
-- Create: `rust/Cargo.toml` (`[package] name = "meetbot"`; binaries are discovered by file name, with no explicit `[[bin]]` entries: `src/main.rs` is `meetbot`, `src/bin/judge-cli.rs` is `judge-cli` (created in Task 12), `src/bin/register-commands.rs` is `register-commands` (created in Task 15)), `rust/rust-toolchain.toml` (pin the toolchain seen in Preflight), `rust/src/lib.rs`, `rust/src/main.rs`, `rust/src/config.rs`
+- Create: `rust/Cargo.toml` (`[package] name = "meetbot"`; binaries are discovered by file name, with no explicit `[[bin]]` entries: `src/main.rs` is `meetbot`, `src/bin/judge-cli.rs` is `judge-cli` (created in Task 12), `src/bin/register-commands.rs` is `register-commands` (created in Task 15)), `rust/rust-toolchain.toml` (pin the toolchain seen in Preflight), `rust/clippy.toml` (`allow-unwrap-in-tests = true`, `allow-expect-in-tests = true`); `rust/Cargo.toml` also carries the `[lints.rust]`, `[lints.clippy]` and `[profile.release]` blocks from the rulebook section "Rust engineering standard", `rust/src/lib.rs`, `rust/src/main.rs`, `rust/src/config.rs`
 - Create: `rust/src/util/{mod.rs,log.rs,time.rs,wav.rs,pin.rs,ffmpeg.rs,limit.rs}`
 
 
@@ -438,14 +440,15 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
       ```rust
       pub fn verify_pin(pin: &str, salt: &str, hash: &str) -> bool {
           if pin.len() != 6 || !pin.bytes().all(|b| b.is_ascii_digit()) { return false; }
+          let Ok(params) = scrypt::Params::new(14, 8, 1, 32) else { return false };
           let mut out = [0u8; 32];
-          scrypt::scrypt(pin.as_bytes(), salt.as_bytes(), &scrypt::Params::new(14, 8, 1, 32).unwrap(), &mut out).unwrap();
+          if scrypt::scrypt(pin.as_bytes(), salt.as_bytes(), &params, &mut out).is_err() { return false; }
           let Ok(expected) = URL_SAFE_NO_PAD.decode(hash) else { return false };
           expected.len() == out.len() && bool::from(out.ct_eq(&expected[..]))
       }
       ```
 - [ ] Step 3: Port the unit tests that exist for these utilities (grep `src/pipeline.test.ts` for `hms`, `pcmToWav`, `truncate`, and the PIN/cookie tests at ~L160-178) as `#[cfg(test)]` modules, plus golden tests for `bangkok_date_time` using the 40 inputs from judge scenario 13.
-- [ ] Step 4: Verify - Run: `cd rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` - Expected: 0 warnings, all tests pass (at least 12), 0 fail.
+- [ ] Step 4: Verify - Run: `cd rust && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked` - Expected: 0 warnings, all tests pass (at least 12), 0 fail.
 - [ ] Step 5: Commit - `git add rust .gitignore && git commit -m "rust: scaffold, config, and utilities"`
 
 ---
@@ -468,7 +471,7 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 **Steps:**
 - [ ] Step 1: Implement and port tests: every `buildTurns/packChunks/toSessionSample/mergeLines` test in `src/pipeline.test.ts` becomes a Rust unit test with the same inputs and expected values.
 - [ ] Step 2: Add `rust/tests/manifest_compat.rs`: deserialize a Node-written manifest (copy of `judge/golden` manifest) and re-serialize; assert JSON equality after parsing both to `serde_json::Value` with `preserve_order` on, and assert `participants` key order is unchanged. Required manifest fields use `#[serde(default)]` where Node never validated them (`loadRemote` is an unchecked cast, `src/storage/manifest.ts:73-76`; the ported web fixtures omit `guildId`, `commandChannelId`, `startedBy`).
-- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test` - Expected: 0 warnings, all pass, including the ported `plan` tests and `manifest_compat`.
+- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test` - Expected: 0 warnings, all pass, including the ported `plan` tests and `manifest_compat`.
 - [ ] Step 4: Commit - `git add rust && git commit -m "rust: storage, manifest, and plan modules"`
 
 ---
@@ -489,7 +492,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 **Steps:**
 - [ ] Step 1: Implement the three modules. `reqwest::Client` built once. Retry helper mirrors `withRetry` (`[2000, 6000, 15000]` ms waits, 3 attempts).
 - [ ] Step 2: Port tests from `src/pipeline/run.test.ts` that cover fallback and failure marks (that file uses HTTP 400 for the primary model, ~L75), using a local `axum` stub server on an ephemeral port as the OpenRouter (set `OPENROUTER_BASE_URL`).
-- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test -- openrouter transcribe summarize` - Expected: all pass, 0 fail.
+- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test -- openrouter transcribe summarize` - Expected: all pass, 0 fail.
 - [ ] Step 4: Commit - `git add rust && git commit -m "rust: openrouter client, transcription, summaries"`
 
 ---
@@ -512,7 +515,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 **Steps:**
 - [ ] Step 1: Implement. Port ALL six `src/pipeline/run.test.ts` cases, including `findOutputChannel` order/permissions (tests 4 and 5 there, against `choose_output_channel`) and the `notifyFailure` text, plus happy path with tone audio through real ffmpeg and recovery as `rust/tests/pipeline.rs` using the fake S3 from Task 5 started as a child Node process, or a small `axum` S3 stub inside the test crate (pick the stub; no Node dependency in `cargo test`).
 - [ ] Step 2: Build release binaries: `cd rust && cargo build --release --bins`.
-- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test --test pipeline` - Expected: 0 warnings, all pass.
+- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test --test pipeline` - Expected: 0 warnings, all pass.
 - [ ] Step 3b: Verify - Run: `node judge/run.mjs --impl rust 2>&1 | tail -20` - Expected: scenarios 6-13 PASS; scenarios 1-5 FAIL or SKIP only because the web server is not built yet (Task 13). List any other FAIL, fix it in Rust, never in the judge unless the judge is proven wrong against the Node run.
 - [ ] Step 4: Commit - `git add rust && git commit -m "rust: assemble, publish, pipeline orchestrator, judge-cli"`
 
@@ -533,7 +536,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 **Steps:**
 - [ ] Step 1: Port `src/web/server.test.ts` (all 6 tests) to `rust/tests/web.rs` with `tower::ServiceExt::oneshot`.
 - [ ] Step 2: Implement.
-- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test --test web` - Expected: 6 pass, 0 fail.
+- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test --test web` - Expected: 6 pass, 0 fail.
 - [ ] Step 4: Verify - Run: `cd rust && cargo build --release --bins && cd .. && node judge/run.mjs --impl rust 2>&1 | tail -16` - Expected: `13/13` PASS (including scenario 5 against the Node-recorded HTML goldens).
 - [ ] Step 5: Commit - `git add rust && git commit -m "rust: playback web server"`
 
@@ -555,7 +558,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 
 **Steps:**
 - [ ] Step 1: Port the track-writer tests from `src/bot.test.ts` (`each speaker gets their own track, placed at the real time they spoke`, `finished 5-minute segments are backed up`) at the unit level: feed PCM and assert file contents and returned utterances. Add boundary cases: utterance exactly at 7_200_000, utterance spanning two segments, `expected_sample` earlier than `cursor`, `close_segment` padding for a short last segment.
-- [ ] Step 2: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test recorder` - Expected: all pass, 0 fail.
+- [ ] Step 2: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test recorder` - Expected: all pass, 0 fail.
 - [ ] Step 3: Commit - `git add rust && git commit -m "rust: track writer and segment uploader"`
 
 ---
@@ -588,7 +591,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 **Steps:**
 - [ ] Step 1: Implement `session.rs` with a `VoiceTick` handler feeding a per-user state machine (`Idle`, `Speaking { last_packet_ms }`) and a 20 ms-resolution timer check for the 1000 ms silence rule.
 - [ ] Step 2: Port ALL 12 tests of `src/bot.test.ts` at session level (the 2 recording tests too: bots ignored, meeting length includes the last words, segment closes on the 15 s tick, `uploaded:[0]` lands in the R2 manifest mid-meeting; plus the R2-down-at-`/record` test, `bot.test.ts:280`) using `tokio::time::pause()`, a scripted `VoiceTick` source, and one `DiscordPort` trait covering interaction replies (reply, defer, edit), member voice-channel lookup, permission check, channel send and fetch. No other abstraction over serenity. `handle_continue` takes a `ContinueClick { user_name: String, reply: Box<dyn Reply> }` built from the serenity interaction in `interactions.rs`, not the concrete serenity type. Add the lost-packet test (`packet: None` with 1920 decoded samples must not move the cursor).
-- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets -- -D warnings && cargo test --test session` - Expected: 13 pass, 0 fail (12 ported `bot.test.ts` tests plus the lost-packet test). Put all session tests in `rust/tests/session.rs` and run `cargo test --test session` so the count is exact.
+- [ ] Step 3: Verify - Run: `cd rust && cargo clippy --all-targets --locked -- -D warnings && cargo test --test session` - Expected: 13 pass, 0 fail (12 ported `bot.test.ts` tests plus the lost-packet test). Put all session tests in `rust/tests/session.rs` and run `cargo test --test session` so the count is exact.
 - [ ] Step 4: Verify - Run: `cd rust && cargo build --release --bins && ls target/release | grep -E '^(meetbot|register-commands|judge-cli)$' | wc -l` - Expected: `3`.
 - [ ] Step 5: Commit - `git add rust && git commit -m "rust: recording session, interactions, bot entry"`
 
@@ -625,7 +628,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 - Consumes: `judge-cli` of both implementations (Tasks 4, 12). Produces: `node judge/cross-crypto.mjs` printing `N/N` for the four cross directions (hash and cookie, each way).
 
 **Steps:**
-- [ ] Step 1: Verify - Run: `cd rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test && cd .. && npm run typecheck && npm test 2>&1 | tail -6 && node judge/run.mjs --impl node | tail -1 && node judge/run.mjs --impl rust | tail -1` - Expected: all green, Node `13/13`, Rust `13/13`, Node tests 31+ pass 0 fail.
+- [ ] Step 1: Verify - Run: `cd rust && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked && cd .. && npm run typecheck && npm test 2>&1 | tail -6 && node judge/run.mjs --impl node | tail -1 && node judge/run.mjs --impl rust | tail -1` - Expected: all green, Node `13/13`, Rust `13/13`, Node tests 31+ pass 0 fail.
 - [ ] Step 2: Verify - Run: `node judge/validate.mjs | grep -c '^caught'` - Expected: `6` (judge still catches breakage after all changes).
 - [ ] Step 3: 👤 Verify - Human: in the throwaway guild, run the Rust bot (`$CE compose -f docker-compose.rust.yml up`) with the staging env: `/record` with two people speaking for 6 minutes (crossing one 5-minute segment boundary), `/end`. Expected: announcement in the command channel and voice chat, post in `#meeting-of-minutes` within a few minutes with embed, PIN, `summary-full-*.md` and `transcript-*.txt`; the playback link asks for the PIN, plays mixed audio, seeks late in the file, and downloads per-speaker `.ogg`. Then kill the container with `$CE kill` mid-recording, restart it, and expect the meeting to be recovered and posted with the restart note. Proxy: Task 17 Step 1 (judge 13/13 covers the HTTP, R2, OpenRouter, and publish payload) and Task 15 Step 3 (ported session tests).
 - [ ] Step 4: Verify - Manual: after the Human run, `ffprobe` the downloaded `meeting.mp3` and one `.ogg`; Expected: codecs `mp3` and `opus`, mixed duration within 2 s of the recorded length.
@@ -662,7 +665,7 @@ Request timeouts: transcription 180 s, chat 600 s. First STT request includes `r
 
 Run this section after Task 17 and before Task 18 (`validate.mjs` needs `src/`). The Manual item needs `node judge/fake-s3.mjs --serve <port>` (a standalone mode of the fake, added in Task 5 alongside `--selftest`).
 
-- [ ] Run: `cd rust && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test` - Expected: exit 0, 0 failures.
+- [ ] Run: `cd rust && cargo fmt --all -- --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked` - Expected: exit 0, 0 failures.
 - [ ] Run: `node judge/run.mjs --impl rust | tail -1` - Expected: `13/13`.
 - [ ] Run: `node judge/validate.mjs | grep -c '^caught'` - Expected: `6`.
 - [ ] Manual: start the Rust web-only server against the fake S3 (`R2_ENDPOINT=<fake> meetbot web-only`), load a judge fixture meeting with Playwright, enter the PIN, and press play on the audio element - Expected: login succeeds, `audio.currentTime` advances, `audio.duration` is within 1 s of the fixture length.
