@@ -30,7 +30,7 @@ export async function goldenVectors(open) {
       cookie: {
         good,
         expired,
-        badExpiry: `12345.${good.split(".")[1] ?? "abc"}`,
+        badExpiry: `abc.${good.split(".")[1] ?? "abc"}`,
         badBase64: `${good.split(".")[0]}.%%%not-base64`,
         noDot: "onlyonepart",
       },

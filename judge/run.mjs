@@ -9,7 +9,6 @@
  */
 import { spawn } from "node:child_process";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,16 +45,13 @@ function parseArgs(argv) {
   return args;
 }
 
-const freePort = () =>
-  new Promise((resolve, reject) => {
-    const srv = createServer();
-    srv.unref();
-    srv.on("error", reject);
-    srv.listen(0, "127.0.0.1", () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
-  });
+/**
+ * Preflight reserves 18701 for the node web server and 18702 for the rust one,
+ * so parallel --impl runs never collide; JUDGE_NODE_PORT / JUDGE_RUST_PORT
+ * override the defaults.
+ */
+const webPortFor = (impl) =>
+  Number(process.env[impl === "node" ? "JUDGE_NODE_PORT" : "JUDGE_RUST_PORT"] ?? (impl === "node" ? 18701 : 18702));
 
 /** Run a command to completion, capturing stdout/stderr. */
 function runCmd(cmd, args, env) {
@@ -136,7 +132,7 @@ async function openCtx(world, opened, opts = {}) {
   const dataDir = mkdtempSync(join(tmpdir(), "judge-run-"));
   const s3 = await startFakeS3();
   const or = await startFakeOpenRouter(opts.script);
-  const webPort = await freePort();
+  const webPort = webPortFor(world.impl);
   const env = baseEnv(dataDir, s3.url, or.url, webPort);
   const webLog = [];
   const ctx = {
@@ -212,6 +208,7 @@ ${run.stderr}${run.stdout}`);
       await or.close();
       rmSync(dataDir, { recursive: true, force: true });
     },
+    webLog,
   });
   return ctx;
 }
