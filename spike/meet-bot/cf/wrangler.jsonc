@@ -9,6 +9,9 @@
   "containers": [
     {
       "class_name": "MeetSpike",
+      // On podman, deploy fails with IMAGE_REGISTRY_DOESNT_CONTAIN_IMAGE because the local digest differs
+      // from the pushed one. After the first (failed) deploy has pushed the image, point this at the pushed
+      // tag from `wrangler containers images list`: registry.cloudflare.com/<account-id>/everymeet-meet-spike-meetspike:<tag>
       "image": "../Dockerfile",
       "image_build_context": "..",
       "instance_type": "standard-2",
