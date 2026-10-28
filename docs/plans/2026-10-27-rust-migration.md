@@ -411,7 +411,7 @@ These are small, backward-compatible changes to the old code, mirrored in Rust l
 - [x] Step 4: Write `migration/judge-report.md`: portable vs internal-bound test counts as a receipt (`rg -c "^test\(" src --glob '*.test.ts'`), clean-pass line `13/13`, six caught mutations, reviewer findings.
 - [x] Step 5: Verify - Run: `node judge/validate.mjs && git status --short src | wc -l` - Expected: six lines starting `caught`, then `0` (source restored).
 - [ ] Step 6: 👤 Verify - Human: read `migration/judge-report.md`, sign off that the judge is real before Task 9 (the kit's gate). Proxy: Step 5 shows 6/6 mutations caught and 13/13 clean pass.
-  > Awaiting human: sign off on migration/judge-report.md before Task 9 starts. Proxy already passed: validate.mjs caught 6/6 with exit 0 and the clean pass is 13/13 twice after the review fixes.
+  > Signed off by the user 2026-10-27: "approved". Proxy: validate.mjs caught 6/6 with exit 0; clean pass 13/13 twice after review fixes.
 - [x] Step 7: Commit - `git add judge migration && git commit -m "judge: validate against mutations and reviewers"`
   > Deviation: staged explicit paths only (judge/mutations, judge/validate.mjs, judge/scenarios, migration/judge-report.md, this plan) per the executor constraint, because `git add migration` would also stage the untracked migration/cost-log.tsv.
 
