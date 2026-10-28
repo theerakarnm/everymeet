@@ -8,6 +8,7 @@
  * if every scenario passed. Goldens in judge/golden/ are recorded from Node.
  */
 import { spawn } from "node:child_process";
+import { createServer } from "node:net";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -94,19 +95,40 @@ function baseEnv(dataDir, s3Url, orUrl, webPort) {
   };
 }
 
-/** Wait until GET /healthz answers 2xx; fail fast when the server process dies. */
+/** The exact body the bot answers /healthz with; anything else means a stale server owns the port. */
+const HEALTHZ_BODY = "ok";
+
+/** Wait until GET /healthz answers 2xx with the expected body; fail fast when the server process dies. */
 async function waitHealthy(baseUrl, child, timeoutMs = 20_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (child.exitCode !== null) throw new Error(`web server exited early with code ${child.exitCode}`);
     try {
       const res = await fetch(`${baseUrl}/healthz`);
-      if (res.ok) return;
+      if (res.ok && (await res.text()) === HEALTHZ_BODY) return;
     } catch {
       // not up yet
     }
     if (Date.now() > deadline) throw new Error(`web server did not become healthy within ${timeoutMs}ms`);
     await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
+/**
+ * Probe that nothing else is listening where our child will. The server binds
+ * the wildcard address, but a stale server on 127.0.0.1 (where every scenario
+ * fetch goes) would still shadow it on macOS, so both are checked.
+ */
+async function assertPortFree(port) {
+  for (const host of [undefined, "127.0.0.1"]) {
+    const probe = createServer();
+    try {
+      await new Promise((resolve, reject) => probe.once("error", reject).listen(port, host, resolve));
+    } catch (err) {
+      throw new Error(`web port ${port} is already in use (stale server or another judge run): ${err.code ?? err}`);
+    } finally {
+      await new Promise((resolve) => probe.close(() => resolve()));
+    }
   }
 }
 
@@ -184,7 +206,19 @@ ${run.stderr}${run.stdout}`);
       }),
   };
   let child;
+  // Registered before anything below can throw, so a failed start still gets
+  // its web log printed and its child, fakes and temp dir cleaned up.
+  opened.push({
+    stop: async () => {
+      await stopChild(child);
+      await s3.close();
+      await or.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    },
+    webLog,
+  });
   if (opts.web) {
+    await assertPortFree(webPort);
     child =
       world.impl === "node"
         ? spawn("node", ["--import", "tsx", "src/judge-web.ts"], {
@@ -201,15 +235,6 @@ ${run.stderr}${run.stdout}`);
     child.stderr.on("data", (d) => webLog.push(d.toString()));
     await waitHealthy(ctx.webUrl, child);
   }
-  opened.push({
-    stop: async () => {
-      await stopChild(child);
-      await s3.close();
-      await or.close();
-      rmSync(dataDir, { recursive: true, force: true });
-    },
-    webLog,
-  });
   return ctx;
 }
 
