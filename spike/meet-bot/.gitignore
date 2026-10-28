@@ -1,0 +1,5 @@
+auth/
+out/
+runs/
+node_modules/
+*.png

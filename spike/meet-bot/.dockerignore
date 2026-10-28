@@ -1,0 +1,7 @@
+auth
+runs
+out
+node_modules
+cf
+*.png
+native-*.png

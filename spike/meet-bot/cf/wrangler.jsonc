@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "everymeet-meet-spike",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "MeetSpike",
+      "image": "../Dockerfile",
+      "image_build_context": "..",
+      "instance_type": "standard-2",
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "MEET_SPIKE", "class_name": "MeetSpike" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MeetSpike"] }]
+}
