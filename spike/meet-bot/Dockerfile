@@ -6,7 +6,7 @@ RUN apt-get update \
 
 WORKDIR /app
 RUN npm init -y >/dev/null && npm install playwright@1.64.1
-COPY join.mjs human.mjs login.mjs entrypoint.sh ./
+COPY join.mjs human.mjs login.mjs metrics.mjs entrypoint.sh ./
 RUN chmod +x entrypoint.sh
 
 ENTRYPOINT ["./entrypoint.sh"]

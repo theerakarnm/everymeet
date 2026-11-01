@@ -108,9 +108,12 @@ const ff = spawn("ffmpeg", [
 const ffDone = new Promise((r) => ff.on("exit", r));
 log("recording", recordSeconds, "s");
 
-const snap = setInterval(() => shot(page, `06-call-${Date.now()}`), 20000);
+const snap = setInterval(() => shot(page, `06-call-${Date.now()}`), Number(process.env.SCREENSHOT_SECONDS ?? 20) * 1000);
 await ffDone;
 clearInterval(snap);
 await shot(page, "07-end");
+await humanClick(page, leave.first()).catch((e) => log("leave click failed", String(e)));
+await page.waitForTimeout(2000);
+log("left call:", !(await leave.count()));
 log("RESULT ok, recorded mixed.flac");
 await browser.close();

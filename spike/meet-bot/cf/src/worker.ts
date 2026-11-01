@@ -64,12 +64,13 @@ export default {
     const stub = env.MEET_SPIKE.get(env.MEET_SPIKE.idFromName(id));
 
     if (request.method === "POST" && !action) {
-      const body = await request.json<{ meetUrl: string; recordSeconds?: number; prejoinWaitSeconds?: number; authState?: string }>();
+      const body = await request.json<{ meetUrl: string; recordSeconds?: number; prejoinWaitSeconds?: number; screenshotSeconds?: number; authState?: string }>();
       const runEnv: Record<string, string> = {
         MEET_URL: body.meetUrl,
         RECORD_SECONDS: String(body.recordSeconds ?? 60),
         PREJOIN_WAIT_SECONDS: String(body.prejoinWaitSeconds ?? 12),
         ADMIT_TIMEOUT_SECONDS: "180",
+        SCREENSHOT_SECONDS: String(body.screenshotSeconds ?? 20),
       };
       if (body.authState) runEnv.MEET_AUTH_STATE_JSON = body.authState;
       return new Response(await stub.run(runEnv), { headers: { "content-type": "text/plain; charset=utf-8" } });
