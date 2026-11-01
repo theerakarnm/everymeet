@@ -307,7 +307,7 @@ This probe checks it with the spike image before Track C builds on it, including
 - Consumes: the spike image already pushed to the Cloudflare registry (Preflight).
 - Produces: a yes/no for Decision 2; nothing in the repo.
 
-**Rollback:** `cd /Users/jametirakarn/everymeet-intercept-probe && npx wrangler delete && npx wrangler containers list` then `npx wrangler containers delete <ID>` for `everymeet-intercept-probe`; `npx wrangler r2 object delete meeting-recordings/probe/intercept-test.bin --remote`; `rm -rf /Users/jametirakarn/everymeet-intercept-probe`.
+**Rollback:** `cd /Users/jametirakarn/everymeet-intercept-probe && npx wrangler delete --force && npx wrangler containers list` then `npx wrangler containers delete <ID>` for `everymeet-intercept-probe`; `npx wrangler r2 object delete meeting-recordings/probe/intercept-test.bin --remote`; `rm -rf /Users/jametirakarn/everymeet-intercept-probe`.
 
 **Steps:**
 - [ ] Step 1: `mkdir -p /Users/jametirakarn/everymeet-intercept-probe && cd $_ && npm init -y >/dev/null && npm install wrangler@^4.154.0 >/dev/null && npx wrangler whoami | grep -ci "logged in"` prints at least 1 (if not, STOP and ask the user to log in).
@@ -372,7 +372,7 @@ This probe checks it with the spike image before Track C builds on it, including
       } satisfies ExportedHandler<Env>;
       ```
 - [ ] Step 3: `npx wrangler deploy`, then `(umask 077 && openssl rand -hex 24 > token) && npx wrangler secret put PROBE_TOKEN < token`, note the printed workers.dev URL as `<PROBE_URL>`, and wait 60 s.
-- [ ] Step 4: Verify - Manual: `curl -s -H "authorization: Bearer $(cat token)" <PROBE_URL>` (repeat after 30 s while it answers "no container instance available"), then `npx wrangler r2 object get meeting-recordings/probe/intercept-test.bin --remote --file /Users/jametirakarn/everymeet-intercept-probe/got.bin && wc -c < /Users/jametirakarn/everymeet-intercept-probe/got.bin` - Expected: the curl body is `200 {"stored":12582912,"path":"/segments/0"}` and `wc -c` prints `12582912`.
+- [ ] Step 4: Verify - Manual: `curl -s -H "authorization: Bearer $(cat token)" <PROBE_URL>` (repeat every 30 s while it answers "no container instance available", "Could not resolve host" for a brand-new workers.dev subdomain, or "error code: 1101" HTTP 500 while the container is not ready), then `npx wrangler r2 object get meeting-recordings/probe/intercept-test.bin --remote --file /Users/jametirakarn/everymeet-intercept-probe/got.bin && wc -c < /Users/jametirakarn/everymeet-intercept-probe/got.bin` - Expected: the curl body is `200 {"stored":12582912,"path":"/segments/0"}` and `wc -c` prints `12582912`.
       If the output starts with `ERR` (for example `ENOTFOUND`) or any status other than 200, STOP: report the output to the user before Track C; the transport in Decision 2 has to be re-decided (see Failure handling).
 - [ ] Step 5: Run the Rollback line.
   No commit.
