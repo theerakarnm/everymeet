@@ -12,6 +12,9 @@ Every 5 minutes a finished segment is uploaded to R2 as FLAC, so a crash loses a
 `/end` (or an auto-end rule: 2 h "Continue recording?" prompt, or empty channel for 3 min) stops recording, skips silence, packs each speaker's speech into transcription requests of up to ~2 minutes, interleaves the transcripts by time, generates full and short Thai summaries, and posts the result with a 6-digit PIN.
 If the bot dies mid-meeting, `recoverUnfinished()` closes the meeting at the last heartbeat on restart and processes what it has.
 
+`/record-meet` records a Google Meet call instead: the recorder runs on Cloudflare Containers (`meet/`), uploads 5-minute FLAC segments to R2 through its Durable Object, and the bot polls it and feeds the same pipeline with one mixed pseudo-participant `meet`.
+Meet recording is optional and stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
+
 ## Hard constraint: Node 22, not Bun
 
 - The runtime is Node >= 22.12.0 because `@discordjs/voice` needs it for audio receive and Discord's DAVE voice encryption.
@@ -28,9 +31,11 @@ npm start            # node dist/index.js (production)
 npm run typecheck    # tsc over src including tests, no emit
 npm test             # all suites with node:test, requires ffmpeg on PATH
 npm run register     # register slash commands (needs .env, reads dist/, so build first)
+cd meet && npm ci && npm run typecheck && npm test   # the meet-recorder package (Worker + container)
+cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 ```
 
-- Run `npm run typecheck` and `npm test` before considering work done.
+- Run `npm run typecheck` and `npm test` (root) and, when `meet/` or `src/meet/protocol.ts` / `src/storage/keys.ts` changed, the same two in `meet/`.
 - There is no linter or CI configured, so these two commands are the quality gate.
 - `npm test` needs ffmpeg installed locally; the full suite currently passes in about 3 seconds.
 
@@ -43,10 +48,14 @@ npm run register     # register slash commands (needs .env, reads dist/, so buil
 | `src/recorder/` | Voice session lifecycle, per-speaker PCM track writer, 5-min FLAC segment uploader |
 | `src/pipeline/` | Meeting processing: `plan.ts` (pure planning math), `assemble`, `transcribe`, `summarize`, `publish`, `run` (orchestrator), `openrouter` (API client) |
 | `src/storage/` | `manifest.json` state model and the R2 client |
+| `src/storage/keys.ts` | R2 key builders, import-free so the Worker can bundle them |
+| `src/meet/` | Google Meet side of the bot: MeetSession (poll, Discord messages, manifest), recorder client, VAD, link parsing, shared protocol.ts |
+| `src/recorder/active.ts` | One active recording per guild across Discord and Meet |
 | `src/web/` | Hono playback server, PIN flow, signed cookies, Thai HTML templates |
 | `src/util/` | ffmpeg wrappers, concurrency limiter, logger, PIN/crypto helpers, time formatting, wav |
 | `src/test/setup.ts` | Shared test setup: fake env, in-memory R2, scripted OpenRouter fetch |
 | `diag-commands.mts` | Debug script to inspect slash command registration against the Discord API |
+| `meet/` | Separate npm package: Cloudflare Worker + Durable Object (worker/) and the Playwright container runner (bot/) |
 
 ## Code style guidelines
 
@@ -82,7 +91,9 @@ npm run register     # register slash commands (needs .env, reads dist/, so buil
 - Meeting ids are 12 random bytes (base64url); validate them against `SESSION_ID_RE` before use.
 - Never commit `.env`, never log tokens or secrets.
 - The bot announces that it is recording in the command channel and voice channel chat (consent / PDPA); keep that behavior in any change.
-- Recommend an R2 lifecycle rule deleting `meetings/*/segments/` after ~30 days; segments are only crash backups.
+- Recommend an R2 lifecycle rule deleting `meetings/*/segments/` and `meetings/*/debug/` after ~30 days; segments are only crash backups, and Meet failure screenshots in `debug/` can show people.
+- The bot-account session file (`MEET_AUTH_STATE_FILE`) is a full Google login credential: never commit it, never log it, never write it to R2, Durable Object storage, or the manifest.
+- A Meet recording is announced in the Discord command channel and in the Meet chat (Thai/English notice); keep both.
 
 ## Deployment steps
 
@@ -90,6 +101,8 @@ npm run register     # register slash commands (needs .env, reads dist/, so buil
 - After changing slash command definitions, run once: `docker compose exec meeting-bot node dist/register-commands.js`.
 - The `meeting-data` volume keeps in-progress recordings across restarts; `stop_grace_period: 60s` gives shutdown time to flush the last segment.
 - Debug registration with `npx tsx diag-commands.mts`.
+- The Meet recorder (`meet/`) deploys separately to Cloudflare from podman; see `## Google Meet recording` in README.md.
+- The bot Google account session is mounted read-only from `./secrets` to `/run/secrets/meet` (`MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json`).
 
 ## Gotchas
 
@@ -98,6 +111,9 @@ npm run register     # register slash commands (needs .env, reads dist/, so buil
 - The OpenRouter price unit for MAI-Transcribe 2 is unclear; if billing turns out to be per request, raise `maxChunk` in `pipeline/plan.ts` to reduce the call count.
 - Local temp audio can reach ~170 MB per speaker-hour; `CLEANUP_LOCAL=true` removes it after posting.
 - Every fallback model pair (transcribe, summary) should keep working; do not remove the fallback path.
+- Meet DOM texts and selectors live only in `meet/bot/meet-page.ts`; when joins or end detection break after a Meet UI change, start from `failure.png` in R2 and the `wrangler tail` events.
+- `src/meet/protocol.ts` and `src/storage/keys.ts` are bundled into the Worker and the container: keep them free of imports.
+- `/end` for a Meet recording replies right away, but the minutes arrive only after the recorder reports the end (up to about a minute later).
 
 ## Commits and pull requests
 

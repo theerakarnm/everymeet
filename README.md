@@ -34,7 +34,7 @@ Discord bot that records a voice channel per speaker, uploads the audio to Cloud
 ### 2. Cloudflare R2
 1. Create a bucket (keep public access **off**).
 2. R2 → Manage API tokens → **Object Read & Write** for that bucket → fill `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, `R2_ACCOUNT_ID`.
-3. Recommended: a lifecycle rule to delete `meetings/*/segments/` after 30 days (they are only crash backups).
+3. Recommended: a lifecycle rule to delete `meetings/*/segments/` and `meetings/*/debug/` after 30 days (crash backups and Meet failure screenshots).
 
 ### 3. Deploy on the VPS
 ```bash
@@ -68,6 +68,7 @@ npm run dev
 | Command | Who | What |
 |---|---|---|
 | `/record` | anyone in a voice channel | joins and replies *"I am recording the voice in channel {name}"* |
+| `/record-meet url:<link>` | anyone | sends the bot into a Google Meet call and records it |
 | `/end` | anyone | stops, processes, posts minutes |
 
 One recording per server at a time.
@@ -76,11 +77,69 @@ One recording per server at a time.
 ```
 meetings/<id>/manifest.json         state + PIN hash (never the PIN)
 meetings/<id>/segments/<user>/*.flac  5-min crash backups
+meetings/<id>/segments/meet/*.flac  5-min Google Meet segments
+meetings/<id>/debug/failure.png      screenshot when a Meet join fails
 meetings/<id>/tracks/<user>.ogg      per-speaker audio (Opus 32 kbps)
 meetings/<id>/meeting.mp3            mixed audio (64 kbps, ~29 MB/hour)
 meetings/<id>/transcript.txt
 meetings/<id>/summary-full.md, summary-short.md
 ```
+
+## Google Meet recording
+
+Meet recording is optional.
+It stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
+
+`/record-meet url:<link>` sends a bot into a Google Meet call.
+It posts the same minutes, PIN page, and `#meeting-of-minutes` message as `/record`.
+The recorder runs on Cloudflare Containers (`meet/`): a Worker, one Durable Object per recording, and a Playwright Chromium container (standard-2, about $0.08 per recording hour, at most 2 at a time).
+The bot announces the recording in the Discord channel and posts a Thai/English notice in the Meet chat.
+The audio is one mixed track, so the transcript has no speaker names and the page has no per-speaker files.
+It ends on `/end`, when only the bot is left for `EMPTY_CHANNEL_TIMEOUT_MIN`, when the bot is removed or the call ends, or after `MEET_MAX_DURATION_MIN`.
+`/end` for a Meet recording replies right away.
+The minutes arrive only after the recorder reports the end, up to about a minute later.
+
+The bot-account session file (`meet-auth.json`) is a full login credential for the bot Google account.
+Never commit it and never log it.
+
+### Setup
+
+1. `cd meet && npm ci`.
+2. `npm run meet:login`, open `http://localhost:6080/vnc.html`, sign in to the bot Google account, and close Chromium.
+   The session is in `meet/auth/meet-auth.json`.
+3. Deploy as in the next list.
+4. `npx wrangler secret put RECORDER_TOKEN -c wrangler.deploy.jsonc` with the output of `openssl rand -base64 48`.
+5. On the VPS set `MEET_RECORDER_URL`, `MEET_RECORDER_TOKEN` (same value), and `MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json` in `.env`.
+   Copy the session to `./secrets/meet-auth.json`, then run `chown 1000:1000` and `chmod 600` on it.
+   Run `docker compose up -d --build`.
+6. Run `npm run register` once after the deploy so Discord shows `/record-meet` (in the container: `docker compose exec meeting-bot node dist/register-commands.js`).
+
+### Deploy from podman
+
+Run these in `meet/`:
+
+1. `npm run build:bot`
+2. `TAG=$(git rev-parse --short HEAD)`
+3. `podman build --platform linux/amd64 -t everymeet-meet-recorder:$TAG .`
+4. `WRANGLER_DOCKER_BIN=podman npx wrangler containers push everymeet-meet-recorder:$TAG`
+   It prints `registry.cloudflare.com/<account-id>/everymeet-meet-recorder:<tag>`.
+5. Write `wrangler.deploy.jsonc` as a copy of `wrangler.jsonc` whose `image` is that registry tag.
+   The file is gitignored because it holds the account id.
+6. `npx wrangler deploy -c wrangler.deploy.jsonc`
+
+Why the registry tag: with podman, `wrangler deploy` on the Dockerfile fails on `--provenance=false`.
+After a push, the rollout can also fail with `IMAGE_REGISTRY_DOESNT_CONTAIN_IMAGE` because wrangler reads the digest from podman's local store.
+A new deploy needs about a minute before containers start ("no container instance available" until then).
+
+### Operating it
+
+- Logs: `npx wrangler tail everymeet-meet-recorder` shows one JSON line per recorder event.
+  A failed join leaves `meetings/<id>/debug/failure.png` in R2.
+- When the session expires, the bot says so in Discord.
+  Run setup step 2 again and replace the file on the VPS.
+  No restart is needed, because the file is read on every `/record-meet`.
+- `failure.png` can show participants' names, faces, and chat.
+  The R2 lifecycle rule should delete `meetings/*/debug/` together with `meetings/*/segments/` (about 30 days, PDPA).
 
 ## Things to know
 - **Runtime is Node 22, not Bun.** `@discordjs/voice` requires Node ≥ 22.12 for receiving audio and for Discord's voice encryption (DAVE, via the bundled `@snazzah/davey`). Hono is still used for the web page.

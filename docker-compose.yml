@@ -9,6 +9,8 @@ services:
     volumes:
       # Keeps in-progress recordings so a restart can recover them.
       - meeting-data:/data
+      # Bot Google account session for /record-meet (MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json).
+      - ./secrets:/run/secrets/meet:ro
     ports:
       - "127.0.0.1:8787:8787" # Nginx in front terminates HTTPS
     # Give /end-on-shutdown time to flush the last segment to R2.
