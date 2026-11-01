@@ -14,7 +14,7 @@ export const totalSamples = (m: Manifest) =>
   Math.max(1, Math.round((((m.endedAt ?? m.heartbeatAt) - m.startedAt) * SAMPLE_RATE) / 1000));
 
 /** Get a segment's raw PCM locally, downloading the FLAC backup from R2 if the local file is gone. */
-async function ensureSegment(m: Manifest, userId: string, index: number): Promise<string | undefined> {
+export async function ensureSegment(m: Manifest, userId: string, index: number): Promise<string | undefined> {
   const dir = join(meetingDir(m.id), "segments", userId);
   const raw = segmentPath(dir, index);
   if (existsSync(raw)) return raw;
