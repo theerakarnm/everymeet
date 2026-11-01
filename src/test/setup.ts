@@ -22,8 +22,6 @@ Object.assign(process.env, {
   DATA_DIR: dataDir,
 });
 
-const realR2 = await import("../storage/r2.js");
-
 /** Objects "uploaded" to R2, by key. */
 export const r2 = new Map<string, Buffer>();
 export const r2Text = (key: string) => r2.get(key)?.toString("utf8");
@@ -36,7 +34,6 @@ export function mockR2(opts: { failPuts?: () => boolean } = {}): void {
   };
   mock.module(new URL("../storage/r2.js", import.meta.url).href, {
     namedExports: {
-      keys: realR2.keys,
       putFile: async (key: string, path: string) => put(key, readFileSync(path)),
       putText: async (key: string, body: string) => put(key, Buffer.from(body, "utf8")),
       getText: async (key: string) => r2Text(key),

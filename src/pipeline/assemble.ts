@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { BYTES_PER_SAMPLE, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { segmentPath } from "../recorder/track-writer.js";
 import { meetingDir, type Manifest } from "../storage/manifest.js";
-import { downloadTo, keys } from "../storage/r2.js";
+import { keys } from "../storage/keys.js";
+import { downloadTo } from "../storage/r2.js";
 import { ffmpeg, rawInput } from "../util/ffmpeg.js";
 import { logger } from "../util/log.js";
 

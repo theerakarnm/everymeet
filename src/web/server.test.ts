@@ -6,7 +6,7 @@ mockR2();
 process.env.TRUST_PROXY = "true"; // as behind Nginx; the tests send X-Forwarded-For
 const { createApp } = await import("./server.js");
 const { generatePin, hashPin, newSessionId } = await import("../util/pin.js");
-const { keys } = await import("../storage/r2.js");
+const { keys } = await import("../storage/keys.js");
 
 function storeMeeting(status: "processing" | "done", pin = generatePin()) {
   const id = newSessionId();

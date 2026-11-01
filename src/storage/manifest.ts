@@ -1,7 +1,8 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
-import { getText, keys, putText } from "./r2.js";
+import { keys } from "./keys.js";
+import { getText, putText } from "./r2.js";
 
 export type MeetingStatus = "recording" | "processing" | "done" | "failed";
 

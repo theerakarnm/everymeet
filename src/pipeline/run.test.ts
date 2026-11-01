@@ -13,7 +13,7 @@ import { chatReply, dataDir, flush, mockOpenRouter, mockR2, r2, r2Text, type Ope
 mockR2();
 const { processMeeting, recoverUnfinished } = await import("./run.js");
 const { saveLocal, meetingDir } = await import("../storage/manifest.js");
-const { keys } = await import("../storage/r2.js");
+const { keys } = await import("../storage/keys.js");
 const { TrackWriter } = await import("../recorder/track-writer.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 const { verifyPin, newSessionId } = await import("../util/pin.js");
