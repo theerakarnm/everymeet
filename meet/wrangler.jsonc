@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "everymeet-meet-recorder",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "MeetRecorder",
+      // Deploys from podman use a gitignored wrangler.deploy.jsonc whose image is the pushed registry tag (README).
+      "image": "./Dockerfile",
+      "instance_type": "standard-2",
+      // Cost guardrail: at most two Meet recordings at the same time across all servers.
+      "max_instances": 2
+    }
+  ],
+  "durable_objects": { "bindings": [{ "name": "MEET_RECORDER", "class_name": "MeetRecorder" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MeetRecorder"] }],
+  "r2_buckets": [{ "binding": "BUCKET", "bucket_name": "meeting-recordings" }]
+}
