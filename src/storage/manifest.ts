@@ -25,10 +25,14 @@ export interface Manifest {
   id: string;
   guildId: string;
   guildName: string;
+  /** Discord voice channel id; for a Google Meet recording, the Meet code. */
   voiceChannelId: string;
+  /** Discord voice channel name; for a Google Meet recording, "Google Meet <code>". */
   voiceChannelName: string;
   /** Text channel where /record was used (fallback output + continue prompts). */
   commandChannelId: string;
+  /** Set when the audio came from a Google Meet call (one mixed track) instead of a Discord voice channel. */
+  meet?: { url: string; code: string };
   startedBy: { id: string; name: string };
   startedAt: number;
   endedAt?: number;
