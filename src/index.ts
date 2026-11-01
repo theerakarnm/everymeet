@@ -1,6 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { config } from "./config.js";
-import { activeSessions } from "./recorder/session.js";
+import { activeSessions } from "./recorder/active.js";
 import { recoverUnfinished } from "./pipeline/run.js";
 import { handleInteraction, handleVoiceStateUpdate } from "./interactions.js";
 import { startWebServer } from "./web/server.js";
@@ -22,8 +22,9 @@ client.once(Events.ClientReady, async (ready) => {
 });
 
 async function shutdown(signal: string) {
-  log.info(`${signal} received, ending active recordings`);
-  await Promise.allSettled([...activeSessions.values()].map((s) => s.end("the bot is shutting down")));
+  log.info(`${signal} received, stopping active recordings`);
+  // Discord recordings end now; Google Meet recordings keep running on Cloudflare and are re-attached on boot.
+  await Promise.allSettled([...activeSessions.values()].map((s) => s.shutdown()));
   // Processing continues after restart thanks to recoverUnfinished().
   await client.destroy();
   process.exit(0);

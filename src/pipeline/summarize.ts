@@ -14,6 +14,10 @@ const SYSTEM = `คุณคือเลขานุการการประ�
 - ห้ามใช้ตาราง (Discord แสดงตารางไม่ได้) ให้ใช้หัวข้อและ bullet แทน`;
 
 function meetingContext(m: Manifest): string {
+  if (m.meet) {
+    return `ข้อมูลการประชุม: Google Meet (${m.meet.code}) บันทึกโดยบอทของเซิร์ฟเวอร์ Discord "${m.guildName}" เริ่ม ${bangkokDateTime(m.startedAt)}
+เสียงทั้งหมดถูกบันทึกเป็นแทร็กเดียว transcript จึงไม่ได้ระบุว่าใครพูด ห้ามเดาชื่อผู้พูด ให้ระบุชื่อเฉพาะเมื่อมีการเอ่ยชื่อในบทสนทนา`;
+  }
   const names = Object.values(m.participants).map((p) => p.displayName);
   return `ข้อมูลการประชุม: ห้อง "${m.voiceChannelName}" ในเซิร์ฟเวอร์ "${m.guildName}" เริ่ม ${bangkokDateTime(
     m.startedAt,

@@ -6,6 +6,7 @@ import { mock } from "node:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { RecordingJob, RecordingStatus } from "../meet/protocol.js";
 
 export const dataDir = mkdtempSync(join(tmpdir(), "meeting-bot-test-"));
 
@@ -79,3 +80,43 @@ export const chatReply = (text: string) => Response.json({ choices: [{ message: 
 export const flush = async (rounds = 5) => {
   for (let i = 0; i < rounds; i++) await new Promise((r) => setImmediate(r));
 };
+
+export interface FakeRecording {
+  job: RecordingJob;
+  status: RecordingStatus;
+  stopped: boolean;
+}
+
+/**
+ * Replaces fetch with a scripted meet-recorder Worker (meet/worker). Tests move a recording along by
+ * editing `recordings.get(id).status`; `down` makes every call fail like a network error.
+ */
+export function fakeMeetRecorder() {
+  const fake = {
+    recordings: new Map<string, FakeRecording>(),
+    authorizations: [] as string[],
+    /** "<METHOD> <path>" of every call that reached the fake. */
+    requests: [] as string[],
+    down: false,
+    failStart: false,
+  };
+  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
+    if (fake.down) throw new TypeError("fetch failed");
+    fake.authorizations.push(new Headers(init.headers).get("authorization") ?? "");
+    fake.requests.push(`${init.method ?? "GET"} ${new URL(url).pathname}`);
+    const [, , id, action] = new URL(url).pathname.split("/");
+    const rec = fake.recordings.get(id!);
+    if (init.method === "POST" && action === undefined) {
+      if (fake.failStart) return new Response("no container instance available", { status: 500 });
+      fake.recordings.set(id!, { job: JSON.parse(String(init.body)), status: { state: "starting", segments: [] }, stopped: false });
+      return new Response(null, { status: 202 });
+    }
+    if (!rec) return new Response("not found", { status: 404 });
+    if (init.method === "POST" && action === "stop") {
+      rec.stopped = true;
+      return new Response(null, { status: 202 });
+    }
+    return Response.json(rec.status);
+  }) as typeof fetch;
+  return fake;
+}

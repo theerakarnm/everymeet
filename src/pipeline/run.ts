@@ -7,6 +7,8 @@ import { putFile, putText } from "../storage/r2.js";
 import { generatePin, hashPin } from "../util/pin.js";
 import { pLimit } from "../util/limit.js";
 import { logger } from "../util/log.js";
+import { markMeetSpeech } from "../meet/speech.js";
+import { MeetSession } from "../meet/session.js";
 import { buildRawTracks, encodeTracks, mixTracks } from "./assemble.js";
 import { transcribeMeeting } from "./transcribe.js";
 import { fullSummary, shortSummary } from "./summarize.js";
@@ -26,9 +28,13 @@ async function run(client: Client, m: Manifest): Promise<void> {
   try {
     m.outputs ??= {};
 
+    // 0. A Google Meet recording is one mixed track without speech marks; find where people spoke.
+    if (m.meet) await markMeetSpeech(m);
+
     // 1. Audio: per-speaker tracks + one mixed file, all to R2.
     const raw = await buildRawTracks(m);
-    const tracks = await encodeTracks(raw);
+    // A Meet recording has a single mixed track, which meeting.mp3 already is.
+    const tracks = m.meet ? {} : await encodeTracks(raw);
     m.outputs.tracks = {};
     for (const [userId, path] of Object.entries(tracks)) {
       const key = keys.track(m.id, userId);
@@ -67,7 +73,13 @@ async function run(client: Client, m: Manifest): Promise<void> {
     await saveEverywhere(m);
 
     const notes: string[] = [];
-    if (m.recovered) notes.push("บอทรีสตาร์ทระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน");
+    if (m.recovered) {
+      notes.push(
+        m.meet
+          ? "บอท Google Meet หยุดทำงานระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน"
+          : "บอทรีสตาร์ทระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน",
+      );
+    }
     if (t.failedChunks > 0) notes.push(`ถอดเสียงไม่สำเร็จ ${t.failedChunks} จาก ${t.totalChunks} ช่วง`);
     m.outputs.postedMessageUrl = await publishMinutes(client, m, {
       pin,
@@ -100,6 +112,11 @@ async function run(client: Client, m: Manifest): Promise<void> {
  */
 export async function recoverUnfinished(client: Client): Promise<void> {
   for (const m of unfinishedLocal()) {
+    // A Google Meet recording runs on Cloudflare, so it survived the restart: keep following it.
+    if (m.meet && m.status === "recording") {
+      MeetSession.resume(client, m, (done) => void processMeeting(client, done));
+      continue;
+    }
     if (m.status === "recording") {
       log.warn(`recovering ${m.id}: recorder stopped unexpectedly, closing at last heartbeat`);
       m.endedAt = m.heartbeatAt;

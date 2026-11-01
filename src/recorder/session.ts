@@ -24,6 +24,7 @@ import { newSessionId } from "../util/pin.js";
 import { logger } from "../util/log.js";
 import { TrackWriter, segmentPath } from "./track-writer.js";
 import { SegmentUploader } from "./segment-uploader.js";
+import { activeSessions, type ActiveRecording } from "./active.js";
 
 const log = logger("session");
 
@@ -32,12 +33,9 @@ export const CONTINUE_BUTTON_PREFIX = "meeting-continue:";
 const SEGMENT_GRACE_SAMPLES = SAMPLE_RATE * 15;
 const TICK_MS = 15_000;
 
-/** One active recording per guild (a bot can only be in one voice channel per guild). */
-export const activeSessions = new Map<string, MeetingSession>();
-
 type OnFinished = (manifest: Manifest) => void;
 
-export class MeetingSession {
+export class MeetingSession implements ActiveRecording {
   readonly manifest: Manifest;
   private connection!: VoiceConnection;
   private readonly writers = new Map<string, TrackWriter>();
@@ -313,6 +311,11 @@ export class MeetingSession {
   end(reason: string): Promise<void> {
     this.ending ??= this.doEnd(reason);
     return this.ending;
+  }
+
+  /** A Discord recording cannot outlive the process, so it ends now; recoverUnfinished() covers a hard kill. */
+  shutdown(): Promise<void> {
+    return this.end("the bot is shutting down");
   }
 
   private async doEnd(reason: string): Promise<void> {
