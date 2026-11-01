@@ -9,10 +9,11 @@ import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { Collection } from "discord.js";
 import OpusScript from "opusscript";
-import { flush, mockR2, r2 } from "./test/setup.js";
+import { fakeMeetRecorder, flush, mockR2, r2 } from "./test/setup.js";
 
 let r2Down = false;
 mockR2({ failPuts: () => r2Down });
+const meetWorker = fakeMeetRecorder();
 
 class FakeReceiver {
   speaking = new EventEmitter();
@@ -59,6 +60,7 @@ const { handleInteraction, handleVoiceStateUpdate } = await import("./interactio
 const { activeSessions } = await import("./recorder/active.js");
 const { keys } = await import("./storage/keys.js");
 const { SAMPLE_RATE } = await import("./config.js");
+const { MeetSession } = await import("./meet/session.js");
 
 // ---- a fake Discord server --------------------------------------------------
 
@@ -119,10 +121,11 @@ function makeServer() {
     voiceUpdate(m, voice.id, null);
   };
 
-  const command = async (name: "record" | "end", member: any) => {
+  const command = async (name: "record" | "end" | "record-meet", member: any, options: Record<string, string> = {}) => {
     const replies: any[] = [];
     const i: any = {
       commandName: name,
+      options: { getString: (n: string) => options[n] ?? null },
       member,
       guild,
       guildId: guild.id,
@@ -205,6 +208,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await Promise.all([...activeSessions.values()].map((s) => s.end("test cleanup")));
+  for (const s of activeSessions.values()) await s.shutdown(); // Meet sessions wait for their recorder
+  activeSessions.clear();
   mock.timers.reset();
 });
 
@@ -446,5 +451,60 @@ test("a bot left alone in the channel does not count as a participant", async ()
   await s.command("record", alice);
   s.leave(alice);
   await advance(3 * MIN);
+  assert.equal(s.session(), undefined);
+});
+
+// ---- Google Meet ---------------------------------------------------------------
+
+const MEET_LINK = "https://meet.google.com/abc-defg-hij";
+
+test("/record-meet refuses anything that is not a Google Meet link", async () => {
+  const s = makeServer();
+  const alice = s.person("alice", "Alice");
+  const [reply] = await s.command("record-meet", alice, { url: "https://zoom.us/j/123" });
+  assert.match(reply.content, /not a Google Meet link/);
+  assert.ok(reply.flags, "only the caller sees it");
+  assert.equal(s.session(), undefined);
+});
+
+test("/record-meet works from any channel, and a server records one meeting at a time across Discord and Meet", async () => {
+  const s = makeServer();
+  const alice = s.person("alice", "Alice");
+  const replies = await s.command("record-meet", alice, { url: MEET_LINK });
+  assert.match(replies.at(-1).content, /Joining Google Meet \*\*abc-defg-hij\*\*/);
+  assert.ok(s.session() instanceof MeetSession);
+  s.join(alice);
+  const [again] = await s.command("record", alice);
+  assert.match(again.content, /already recording in \*\*Google Meet abc-defg-hij\*\*/);
+  const [twice] = await s.command("record-meet", alice, { url: "abc-defg-hij" });
+  assert.match(twice.content, /already recording in \*\*Google Meet abc-defg-hij\*\*/);
+
+  const other = makeServer();
+  const bob = other.person("bob", "Bob");
+  other.join(bob);
+  await other.command("record", bob);
+  const [blocked] = await other.command("record-meet", bob, { url: MEET_LINK });
+  assert.match(blocked.content, /already recording in \*\*daily-standup\*\*/);
+});
+
+test("/end on a Meet recording tells the recorder to stop, and processing starts when the recorder reports the end", async () => {
+  const s = makeServer();
+  const alice = s.person("alice", "Alice");
+  const dave = s.person("dave", "Dave");
+  await s.command("record-meet", alice, { url: MEET_LINK });
+  const id = s.session()!.id;
+  const rec = meetWorker.recordings.get(id)!;
+  rec.status = { state: "recording", captureStartedAt: Date.now(), consentPosted: true, segments: [] };
+  await advance(15_000);
+  assert.ok(s.sent.includes("🔴 I am recording the Google Meet call abc-defg-hij"));
+
+  const [reply] = await s.command("end", dave);
+  assert.match(reply.content, /Recording in \*\*Google Meet abc-defg-hij\*\* stopped/);
+  assert.equal(rec.stopped, true);
+  rec.status = { ...rec.status, state: "ended", segments: [{ index: 0, samples: 60 * SAMPLE_RATE }], end: { reason: "stopped", leftCleanly: true } };
+  await advance(15_000);
+  await flush(20);
+  assert.equal(lastFinished().id, id);
+  assert.equal(lastFinished().endReason, "ended by Dave with /end");
   assert.equal(s.session(), undefined);
 });

@@ -8,6 +8,7 @@ import { generatePin, hashPin } from "../util/pin.js";
 import { pLimit } from "../util/limit.js";
 import { logger } from "../util/log.js";
 import { markMeetSpeech } from "../meet/speech.js";
+import { MeetSession } from "../meet/session.js";
 import { buildRawTracks, encodeTracks, mixTracks } from "./assemble.js";
 import { transcribeMeeting } from "./transcribe.js";
 import { fullSummary, shortSummary } from "./summarize.js";
@@ -111,6 +112,11 @@ async function run(client: Client, m: Manifest): Promise<void> {
  */
 export async function recoverUnfinished(client: Client): Promise<void> {
   for (const m of unfinishedLocal()) {
+    // A Google Meet recording runs on Cloudflare, so it survived the restart: keep following it.
+    if (m.meet && m.status === "recording") {
+      MeetSession.resume(client, m, (done) => void processMeeting(client, done));
+      continue;
+    }
     if (m.status === "recording") {
       log.warn(`recovering ${m.id}: recorder stopped unexpectedly, closing at last heartbeat`);
       m.endedAt = m.heartbeatAt;
