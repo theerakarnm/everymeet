@@ -5,6 +5,9 @@ const bool = z
   .optional()
   .transform((v) => v === "true" || v === "1");
 
+/** Empty values in .env mean "not set". */
+const blank = (v: unknown) => (v === "" ? undefined : v);
+
 const schema = z.object({
   DISCORD_TOKEN: z.string().min(1),
   DISCORD_CLIENT_ID: z.string().min(1),
@@ -45,6 +48,18 @@ const schema = z.object({
     .string()
     .optional()
     .transform((v) => v !== "false"),
+
+  /** Origin of the meet-recorder Worker (meet/). /record-meet is off when unset. */
+  MEET_RECORDER_URL: z.preprocess(blank, z.url().optional()),
+  /** Same value as the Worker secret RECORDER_TOKEN. */
+  MEET_RECORDER_TOKEN: z.preprocess(blank, z.string().min(32).optional()),
+  /** Playwright storageState of the bot's Google account (npm run meet:login in meet/). Unset = join as a guest. */
+  MEET_AUTH_STATE_FILE: z.preprocess(blank, z.string().optional()),
+  /** A Google Meet recording ends after this many minutes; the Worker refuses more than 6 h. */
+  MEET_MAX_DURATION_MIN: z.coerce.number().positive().max(360).default(240),
+}).refine((c) => !c.MEET_RECORDER_URL === !c.MEET_RECORDER_TOKEN, {
+  message: "set MEET_RECORDER_URL and MEET_RECORDER_TOKEN together",
+  path: ["MEET_RECORDER_TOKEN"],
 });
 
 export type Config = z.infer<typeof schema>;

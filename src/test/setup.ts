@@ -9,6 +9,10 @@ import { join } from "node:path";
 
 export const dataDir = mkdtempSync(join(tmpdir(), "meeting-bot-test-"));
 
+/** Stand-in for the bot account session file; tests check it never leaks into R2. */
+export const FAKE_MEET_AUTH = '{"cookies":[{"name":"SID","value":"fake-session-cookie"}],"origins":[]}';
+writeFileSync(join(dataDir, "meet-auth.json"), FAKE_MEET_AUTH);
+
 Object.assign(process.env, {
   DISCORD_TOKEN: "x",
   DISCORD_CLIENT_ID: "x",
@@ -20,6 +24,9 @@ Object.assign(process.env, {
   PUBLIC_BASE_URL: "https://meet.example.com",
   SESSION_SECRET: "s".repeat(40),
   DATA_DIR: dataDir,
+  MEET_RECORDER_URL: "https://meet-recorder.example.com",
+  MEET_RECORDER_TOKEN: "m".repeat(40),
+  MEET_AUTH_STATE_FILE: join(dataDir, "meet-auth.json"),
 });
 
 /** Objects "uploaded" to R2, by key. */

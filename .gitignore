@@ -6,3 +6,4 @@ data
 .env.spike
 rust/**/target/
 rust/spikes/**/spike-out/
+secrets/
