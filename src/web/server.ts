@@ -3,7 +3,7 @@ import { serve } from "@hono/node-server";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { getCookie, setCookie } from "hono/cookie";
 import { config, SAMPLE_RATE } from "../config.js";
-import { loadRemote, type Manifest } from "../storage/manifest.js";
+import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { presign } from "../storage/r2.js";
 import { SESSION_ID_RE, signAccess, verifyAccess, verifyPin } from "../util/pin.js";
@@ -102,7 +102,7 @@ export function createApp(): Hono {
     const id = c.req.param("id");
     const m = await loadReady(id);
     if (!m) return c.html(page.notFound(), 404);
-    if (!hasAccess(c, id)) return c.html(page.pin({ id, title: m.voiceChannelName }));
+    if (!hasAccess(c, id)) return c.html(page.pin({ id, title: meetingTitle(m) }));
     const tracks = Object.entries(m.outputs?.tracks ?? {}).map(([userId]) => ({
       userId,
       name: m.participants[userId]?.displayName ?? userId,
@@ -110,8 +110,8 @@ export function createApp(): Hono {
     return c.html(
       page.player({
         id,
-        title: m.voiceChannelName,
-        guild: m.guildName,
+        title: meetingTitle(m),
+        guild: m.meet ? "Google Meet" : m.guildName,
         started: bangkokDateTime(m.startedAt),
         duration: durationTh(totalSamples(m) / SAMPLE_RATE),
         tracks,
@@ -125,14 +125,14 @@ export function createApp(): Hono {
     if (!m) return c.html(page.notFound(), 404);
     const key = failKey(id, clientIp(c));
     if (isLocked(key)) {
-      return c.html(page.pin({ id, title: m.voiceChannelName, error: "ใส่ PIN ผิดหลายครั้งเกินไป กรุณารอ 15 นาที" }), 429);
+      return c.html(page.pin({ id, title: meetingTitle(m), error: "ใส่ PIN ผิดหลายครั้งเกินไป กรุณารอ 15 นาที" }), 429);
     }
     const body = await c.req.parseBody();
     const pin = String(body.pin ?? "").trim();
     if (!verifyPin(pin, m.pin!.salt, m.pin!.hash)) {
       const left = recordFail(key);
       log.warn(`wrong PIN for ${id} (${left} attempts left)`);
-      return c.html(page.pin({ id, title: m.voiceChannelName, error: `PIN ไม่ถูกต้อง (เหลือ ${left} ครั้ง)` }), 401);
+      return c.html(page.pin({ id, title: meetingTitle(m), error: `PIN ไม่ถูกต้อง (เหลือ ${left} ครั้ง)` }), 401);
     }
     failures.delete(key);
     setCookie(c, cookieName(id), signAccess(id, config().SESSION_SECRET, ACCESS_TTL_MS), {

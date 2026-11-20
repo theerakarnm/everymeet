@@ -11,7 +11,7 @@ import {
   type GuildTextBasedChannel,
 } from "discord.js";
 import { config, SAMPLE_RATE } from "../config.js";
-import type { Manifest } from "../storage/manifest.js";
+import type { DiscordManifest } from "../storage/manifest.js";
 import { bangkokDateTime, durationTh } from "../util/time.js";
 import { totalSamples } from "./assemble.js";
 
@@ -27,7 +27,7 @@ const canPost = (ch: GuildTextBasedChannel, guild: Guild) => {
 };
 
 /** #meeting-of-minutes, else #general, else the channel where /record was used. */
-export async function findOutputChannel(client: Client, m: Manifest): Promise<GuildTextBasedChannel> {
+export async function findOutputChannel(client: Client, m: DiscordManifest): Promise<GuildTextBasedChannel> {
   const c = config();
   const guild = await client.guilds.fetch(m.guildId);
   const channels = await guild.channels.fetch();
@@ -47,7 +47,7 @@ export async function findOutputChannel(client: Client, m: Manifest): Promise<Gu
 
 export async function publishMinutes(
   client: Client,
-  m: Manifest,
+  m: DiscordManifest,
   opts: { pin: string; shortSummary: string; fullSummary: string; transcript: string; note?: string },
 ): Promise<string> {
   const channel = await findOutputChannel(client, m);
@@ -90,7 +90,7 @@ export async function publishMinutes(
   return msg.url;
 }
 
-export async function notifyFailure(client: Client, m: Manifest, error: string): Promise<void> {
+export async function notifyFailure(client: Client, m: DiscordManifest, error: string): Promise<void> {
   try {
     const channel = await findOutputChannel(client, m);
     await channel.send(

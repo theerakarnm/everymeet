@@ -81,8 +81,7 @@ export function formatTranscript(m: Manifest, lines: Line[]): string {
   const speakers = [...new Set(lines.map((l) => speakerName(m, l.userId)))];
   const header = [
     `บันทึกการถอดเสียงการประชุม (Transcript)`,
-    `เซิร์ฟเวอร์: ${m.guildName}`,
-    `ห้องเสียง: ${m.voiceChannelName}`,
+    ...(m.meet ? [`การประชุม: ${m.meet.title} (Google Meet ${m.meet.code})`] : [`เซิร์ฟเวอร์: ${m.guildName}`, `ห้องเสียง: ${m.voiceChannelName}`]),
     `เริ่ม: ${bangkokDateTime(m.startedAt)} | ระยะเวลา: ${durationTh(totalSamples(m) / SAMPLE_RATE)}`,
     `ผู้พูด: ${speakers.join(", ") || "-"}`,
     "",

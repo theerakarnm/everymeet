@@ -1,14 +1,15 @@
 /**
  * The bot side of a Google Meet recording, driven through a scripted meet-recorder Worker
- * with the clock under test control. R2 is in memory; Discord is one fake text channel.
+ * with the clock under test control. R2 is in memory; emails go to the fake sender.
  */
 import { afterEach, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { dataDir, FAKE_MEET_AUTH, fakeMeetRecorder, flush, mockR2, r2 } from "../test/setup.js";
+import { dataDir, FAKE_MEET_AUTH, fakeMeetRecorder, flush, mockEmail, mockR2, r2, sentEmails } from "../test/setup.js";
 
 mockR2();
+mockEmail();
 const worker = fakeMeetRecorder();
 const { MeetSession, MeetRefused, activeMeets } = await import("./session.js");
 const { keys } = await import("../storage/keys.js");
@@ -17,30 +18,18 @@ const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 9, 12, 3, 0, 0);
 const MEET = { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" };
-let guildSeq = 0;
+const ALICE = "alice@example.com";
 
-function harness(meet = MEET) {
-  const said: string[] = [];
+function harness(meet = MEET, startedBy = ALICE) {
   const finished: any[] = [];
-  const guildId = `meet-guild${++guildSeq}`;
-  const client: any = {
-    channels: { fetch: async () => ({ isSendable: () => true, send: async (t: string) => void said.push(t) }) },
-  };
   const onFinished = (m: any) => void finished.push(structuredClone(m));
-  const start = () =>
-    MeetSession.start({
-      client,
-      guildId,
-      guildName: "Planthia",
-      commandChannelId: "cmd",
-      startedBy: { id: "alice", name: "Alice" },
-      meet,
-      onFinished,
-    });
-  return { said, finished, guildId, client, onFinished, start };
+  const info = { ...meet, title: "Weekly standup", trigger: "web" as const, startedBy, recipients: ["bob@example.com", startedBy] };
+  const start = () => MeetSession.start(info, onFinished);
+  return { finished, onFinished, start };
 }
 const remote = (id: string) => worker.recordings.get(id)!;
 const stored = (id: string) => JSON.parse(r2.get(keys.manifest(id))!.toString());
+const mailsTo = (to: string) => sentEmails.filter((e) => e.to === to);
 const advance = async (ms: number) => {
   mock.timers.tick(ms);
   await flush(20); // a poll goes through fetch, Response.json() and the R2 mock
@@ -49,6 +38,7 @@ const advance = async (ms: number) => {
 beforeEach(() => {
   worker.down = false;
   worker.failStart = false;
+  sentEmails.length = 0;
   mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
 });
 afterEach(async () => {
@@ -57,9 +47,8 @@ afterEach(async () => {
   mock.timers.reset();
 });
 
-test("starting sends the link, the session file and the timings to the recorder, and never stores the session", async () => {
-  const h = harness();
-  const s = await h.start();
+test("starting sends the link, the session file and the timings to the recorder, and stores a Meet manifest without Discord fields or the session", async () => {
+  const s = await harness().start();
   assert.deepEqual(remote(s.id).job, {
     meetUrl: MEET.url,
     authState: FAKE_MEET_AUTH,
@@ -71,21 +60,30 @@ test("starting sends the link, the session file and the timings to the recorder,
   });
   assert.equal(worker.authorizations.at(-1), `Bearer ${"m".repeat(40)}`);
   assert.equal(activeMeets.get(MEET.code), s);
+  assert.equal(s.state, "starting");
   const raw = r2.get(keys.manifest(s.id))!.toString();
-  assert.deepEqual(JSON.parse(raw).meet, MEET);
-  assert.equal(JSON.parse(raw).voiceChannelName, "Google Meet abc-defg-hij");
+  assert.deepEqual(JSON.parse(raw).meet, {
+    ...MEET,
+    title: "Weekly standup",
+    trigger: "web",
+    startedBy: ALICE,
+    recipients: [ALICE, "bob@example.com"],
+  });
+  assert.equal(JSON.parse(raw).guildId, undefined);
   assert.ok(!raw.includes("fake-session-cookie"), "the bot account session never reaches R2");
 });
 
-test("the channel is told once recording starts, and when everyone left the meeting goes to processing", async () => {
+test("the recorder's state is followed quietly, and when everyone left the meeting goes to processing", async () => {
   const h = harness();
   const s = await h.start();
   const rec = remote(s.id);
+  rec.status = { state: "waiting", segments: [] };
+  await advance(15_000);
+  assert.equal(s.state, "waiting");
   rec.status = { state: "recording", captureStartedAt: NOW + 40_000, consentPosted: true, segments: [] };
   await advance(15_000);
-  assert.deepEqual(h.said, ["🔴 I am recording the Google Meet call abc-defg-hij"]);
-  await advance(15_000);
-  assert.equal(h.said.length, 1, "announced once");
+  assert.equal(s.state, "recording");
+  assert.equal(sentEmails.length, 0, "no email while things go well");
 
   rec.status = {
     ...rec.status,
@@ -94,57 +92,71 @@ test("the channel is told once recording starts, and when everyone left the meet
     end: { reason: "alone", leftCleanly: true },
   };
   await advance(15_000);
+  assert.equal(activeMeets.get(MEET.code), undefined);
+  assert.equal(stored(s.id).status, "processing");
   const m = h.finished.at(-1);
   assert.equal(m.status, "processing");
   assert.equal(m.startedAt, NOW + 40_000);
   assert.equal(m.endedAt, NOW + 40_000 + 310_000, "5 min + 10 s of audio");
-  assert.equal(m.endReason, "everyone left the Google Meet call for 3 minutes");
+  assert.equal(m.endReason, "ไม่มีผู้เข้าร่วมคนอื่นอยู่ในห้องแล้ว");
   assert.deepEqual(m.participants.meet, {
     displayName: "เสียงรวมจาก Google Meet",
     utterances: [],
     segments: [0, 1],
     uploaded: [0, 1],
   });
-  assert.equal(activeMeets.get(MEET.code), undefined);
-  assert.equal(stored(s.id).status, "processing");
 });
 
-test("if the notice could not be posted in the Meet chat, the Discord announcement asks people to tell the participants", async () => {
-  const h = harness();
-  const s = await h.start();
+test("if the notice could not be posted in the Meet chat, the starter gets one email asking them to tell the participants", async () => {
+  const s = await harness().start();
   remote(s.id).status = { state: "recording", captureStartedAt: NOW, consentPosted: false, segments: [] };
   await advance(15_000);
-  assert.match(h.said[0]!, /could not post the recording notice in the Meet chat/);
+  await advance(15_000);
+  assert.equal(sentEmails.length, 1);
+  assert.equal(sentEmails[0]!.to, ALICE);
+  assert.match(sentEmails[0]!.subject, /กรุณาแจ้งผู้เข้าประชุมว่ากำลังบันทึก/);
 });
 
-test("/end asks the recorder to stop and keeps the Discord reason once the recorder reports the end", async () => {
+test("stop asks the recorder to leave and keeps its reason once the recorder reports the end", async () => {
   const h = harness();
   const s = await h.start();
   const rec = remote(s.id);
   rec.status = { state: "recording", captureStartedAt: NOW, consentPosted: true, segments: [] };
   await advance(15_000);
-  await s.end("ended by Dave with /end");
+  await s.end("หยุดโดย dave@example.com จากหน้าเว็บ");
   assert.equal(rec.stopped, true);
+  assert.equal(s.stopping, true);
   assert.equal(activeMeets.get(MEET.code), s, "still active until the recorder confirms");
   rec.status = { ...rec.status, state: "ended", segments: [{ index: 0, samples: 60 * SAMPLE_RATE }], end: { reason: "stopped", leftCleanly: true } };
   await advance(15_000);
-  assert.equal(h.finished.at(-1).endReason, "ended by Dave with /end");
+  assert.equal(h.finished.at(-1).endReason, "หยุดโดย dave@example.com จากหน้าเว็บ");
   assert.equal(h.finished.at(-1).endedAt, NOW + 60_000);
 });
 
-test("a call the bot never got into is marked failed with a reason-specific message and is not processed", async () => {
+test("a stop that cannot reach the recorder throws, and the recording goes on", async () => {
+  const s = await harness().start();
+  worker.down = true;
+  await assert.rejects(s.end("หยุดโดย dave@example.com จากหน้าเว็บ"));
+  assert.equal(s.stopping, false);
+  assert.equal(activeMeets.get(MEET.code), s);
+});
+
+test("a call the bot never got into is marked failed, is not processed, and the starter gets a reason-specific email", async () => {
   for (const [reason, expected] of [
-    ["denied", /did not let the bot join/],
-    ["not_admitted", /Nobody let the bot into Google Meet \*\*abc-defg-hij\*\* within 15 minutes/],
-    ["auth_expired", /session has expired.*npm run meet:login/],
-    ["stopped", /stopped before the bot got in/],
-    ["join_failed", /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet page offered no way to join\)/],
+    ["denied", /ไม่อนุญาตให้บอทเข้า/],
+    ["not_admitted", /ภายใน 15 นาที/],
+    ["auth_expired", /หมดอายุการเข้าสู่ระบบ.*npm run meet:login/],
+    ["stopped", /ถูกหยุดก่อนบอทเข้าห้อง/],
+    ["join_failed", /หน้า Google Meet ไม่มีปุ่มเข้าร่วม/],
   ] as const) {
     const h = harness();
     const s = await h.start();
     remote(s.id).status = { state: "ended", segments: [], end: { reason, leftCleanly: true } };
     await advance(15_000);
-    assert.match(h.said.at(-1)!, expected, reason);
+    const mail = mailsTo(ALICE).at(-1)!;
+    assert.match(mail.text, expected, reason);
+    assert.match(mail.subject, /บันทึก Google Meet ไม่สำเร็จ - Weekly standup/, reason);
+    assert.equal(mailsTo("bob@example.com").length, 0, "failures go to the starter only");
     assert.equal(h.finished.length, 0, reason);
     assert.equal(stored(s.id).status, "failed", reason);
     assert.equal(activeMeets.get(MEET.code), undefined, reason);
@@ -164,7 +176,7 @@ test("audio from a recorder that died mid-call is still processed and flagged as
   await advance(15_000);
   const m = h.finished.at(-1);
   assert.equal(m.recovered, true);
-  assert.equal(m.endReason, "the Google Meet recorder stopped unexpectedly");
+  assert.equal(m.endReason, "เครื่องบันทึก Google Meet หยุดทำงานโดยไม่คาดคิด");
 });
 
 test("a network outage does not end the meeting: the bot keeps following the recorder and processes it when it is back", async () => {
@@ -186,19 +198,18 @@ test("a network outage does not end the meeting: the bot keeps following the rec
   assert.equal(h.finished.at(-1).status, "processing");
 });
 
-test("the bot gives up only after the recorder's own deadline has passed, and tells the channel", async () => {
-  const h = harness();
-  await h.start();
+test("the bot gives up only after the recorder's own deadline has passed, and emails the starter", async () => {
+  await harness().start();
   worker.down = true;
   const giveUp = (15 + 240 + 60) * MIN; // admit timeout + MEET_MAX_DURATION_MIN + GIVE_UP_GRACE_MS
   await advance(giveUp - 15_000);
   assert.ok(activeMeets.get(MEET.code), "still following");
   await advance(15_000);
   assert.equal(activeMeets.get(MEET.code), undefined);
-  assert.match(h.said.at(-1)!, /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet recorder stopped unexpectedly\)/);
+  assert.match(mailsTo(ALICE).at(-1)!.text, /หยุดทำงานโดยไม่คาดคิด/);
 });
 
-test("after a bot restart a Meet recording is re-attached, not closed, and not announced again", async () => {
+test("after a bot restart a Meet recording is re-attached by its Meet code and nobody is emailed again", async () => {
   const h = harness();
   const s = await h.start();
   remote(s.id).status = { state: "recording", captureStartedAt: NOW, consentPosted: true, segments: [] };
@@ -206,12 +217,12 @@ test("after a bot restart a Meet recording is re-attached, not closed, and not a
   await s.shutdown();
   activeMeets.clear();
 
-  MeetSession.resume(h.client, structuredClone(s.manifest), h.onFinished);
+  MeetSession.resume(structuredClone(s.manifest), h.onFinished);
   await flush();
   assert.ok(activeMeets.get(MEET.code), "re-registered");
   remote(s.id).status = { ...remote(s.id).status, state: "ended", segments: [{ index: 0, samples: SEGMENT_SAMPLES }], end: { reason: "meeting_ended", leftCleanly: true } };
   await advance(15_000);
-  assert.equal(h.said.length, 1, "announced only before the restart");
+  assert.equal(sentEmails.length, 0);
   assert.equal(h.finished.at(-1).id, s.id);
   assert.equal(h.finished.at(-1).recovered, undefined);
 });
@@ -247,10 +258,11 @@ test("one recording per Meet call and at most two at once; refused starts reach 
   const before = worker.requests.length;
   await assert.rejects(harness().start(), (err) => err instanceof MeetRefused && err.reason === "already_recording");
   assert.equal(worker.requests.length, before, "nothing sent for a refused start");
-  await harness(other).start();
-  await assert.rejects(harness(third).start(), (err) => err instanceof MeetRefused && err.reason === "busy");
+  // Different starters, so the per-person limit of Task 7b is not what refuses here.
+  await harness(other, "carol@example.com").start();
+  await assert.rejects(harness(third, "dave@example.com").start(), (err) => err instanceof MeetRefused && err.reason === "busy");
   assert.equal(activeMeets.size, 2);
   remote(first.id).status = { state: "ended", segments: [], end: { reason: "denied", leftCleanly: true } };
   await advance(15_000);
-  assert.ok(await harness(third).start(), "the slot is free again");
+  assert.ok(await harness(third, "dave@example.com").start(), "the slot is free again");
 });

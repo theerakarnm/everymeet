@@ -43,7 +43,7 @@ export const page = {
     shell(
       "ใส่ PIN",
       `<div class="card"><p class="eyebrow">บันทึกการประชุม</p><h1>${esc(o.title)}</h1>
-<p class="meta">ใส่ PIN 6 หลักที่บอทส่งไว้ในข้อความ Discord</p>
+<p class="meta">ใส่ PIN 6 หลักที่บอทส่งมาพร้อมลิงก์นี้</p>
 <form method="post" action="/m/${esc(o.id)}" autocomplete="off">
 <label for="pin">PIN</label>
 <input id="pin" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus>

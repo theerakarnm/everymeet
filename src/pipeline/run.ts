@@ -1,7 +1,9 @@
 import { rmSync } from "node:fs";
 import type { Client } from "discord.js";
 import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
-import { meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest } from "../storage/manifest.js";
+import { sendEmail } from "../email/send.js";
+import { minutesMail, processingFailedMail } from "../email/messages.js";
+import { meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest, type MeetManifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { putFile, putText } from "../storage/r2.js";
 import { generatePin, hashPin } from "../util/pin.js";
@@ -9,7 +11,7 @@ import { pLimit } from "../util/limit.js";
 import { logger } from "../util/log.js";
 import { markMeetSpeech } from "../meet/speech.js";
 import { MeetSession } from "../meet/session.js";
-import { buildRawTracks, encodeTracks, mixTracks } from "./assemble.js";
+import { buildRawTracks, encodeTracks, mixTracks, totalSamples } from "./assemble.js";
 import { transcribeMeeting } from "./transcribe.js";
 import { fullSummary, shortSummary } from "./summarize.js";
 import { notifyFailure, publishMinutes } from "./publish.js";
@@ -67,7 +69,7 @@ async function run(client: Client, m: Manifest): Promise<void> {
     m.outputs.summaryFull = keys.summaryFull(m.id);
     m.outputs.summaryShort = keys.summaryShort(m.id);
 
-    // 4. PIN + post to Discord. Only the hash is stored.
+    // 4. PIN, then the minutes: by email for Google Meet, in Discord otherwise. Only the hash is stored.
     const pin = generatePin();
     m.pin = hashPin(pin);
     await saveEverywhere(m);
@@ -81,13 +83,19 @@ async function run(client: Client, m: Manifest): Promise<void> {
       );
     }
     if (t.failedChunks > 0) notes.push(`ถอดเสียงไม่สำเร็จ ${t.failedChunks} จาก ${t.totalChunks} ช่วง`);
-    m.outputs.postedMessageUrl = await publishMinutes(client, m, {
-      pin,
-      shortSummary: short,
-      fullSummary: full,
-      transcript: t.text,
-      note: notes.join(" / ") || undefined,
-    });
+    const note = notes.join(" / ") || undefined;
+    if (m.meet) {
+      // Nobody spoke (the meeting did not happen): only the organizer or starter is told.
+      await emailMinutes(m, t.lines.length > 0 ? m.meet.recipients : [m.meet.startedBy], { pin, shortSummary: short, note });
+    } else {
+      m.outputs.postedMessageUrl = await publishMinutes(client, m, {
+        pin,
+        shortSummary: short,
+        fullSummary: full,
+        transcript: t.text,
+        note,
+      });
+    }
 
     m.status = "done";
     await saveEverywhere(m);
@@ -102,8 +110,40 @@ async function run(client: Client, m: Manifest): Promise<void> {
     } catch {
       saveLocal(m);
     }
-    await notifyFailure(client, m, m.error);
+    if (m.meet) {
+      await sendEmail({ to: m.meet.startedBy, ...processingFailedMail({ id: m.id, title: m.meet.title, startedAt: m.startedAt, error: m.error }) })
+        .catch((e) => log.error(`could not email the failure of ${m.id}`, e));
+    } else {
+      await notifyFailure(client, m, m.error);
+    }
   }
+}
+
+/**
+ * Emails the minutes to each recipient on their own; fails only when nobody got them.
+ * No idempotency key: processing that is retried after a crash makes a new PIN, so a second email is the correct one.
+ */
+async function emailMinutes(m: MeetManifest, recipients: string[], o: { pin: string; shortSummary: string; note?: string }): Promise<void> {
+  const mail = minutesMail({
+    id: m.id,
+    title: m.meet.title,
+    startedAt: m.startedAt,
+    seconds: totalSamples(m) / SAMPLE_RATE,
+    startedBy: m.meet.startedBy,
+    endReason: m.endReason,
+    ...o,
+  });
+  let sent = 0;
+  for (const to of recipients) {
+    try {
+      await sendEmail({ to, ...mail });
+      sent++;
+    } catch (err) {
+      log.error(`minutes email for ${m.id} not sent`, err);
+    }
+  }
+  if (sent === 0) throw new Error("the minutes email could not be sent to anyone");
+  log.info(`${m.id}: minutes emailed to ${sent} of ${recipients.length}`);
 }
 
 /**
@@ -114,7 +154,7 @@ export async function recoverUnfinished(client: Client): Promise<void> {
   for (const m of unfinishedLocal()) {
     // A Google Meet recording runs on Cloudflare, so it survived the restart: keep following it.
     if (m.meet && m.status === "recording") {
-      MeetSession.resume(client, m, (done) => void processMeeting(client, done));
+      MeetSession.resume(m, (done) => void processMeeting(client, done));
       continue;
     }
     if (m.status === "recording") {

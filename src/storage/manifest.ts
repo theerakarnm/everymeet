@@ -21,19 +21,9 @@ export interface Participant {
   uploaded: number[];
 }
 
-export interface Manifest {
+/** What every recording has, whatever started it. */
+interface ManifestBase {
   id: string;
-  guildId: string;
-  guildName: string;
-  /** Discord voice channel id; for a Google Meet recording, the Meet code. */
-  voiceChannelId: string;
-  /** Discord voice channel name; for a Google Meet recording, "Google Meet <code>". */
-  voiceChannelName: string;
-  /** Text channel where /record was used (fallback output + continue prompts). */
-  commandChannelId: string;
-  /** Set when the audio came from a Google Meet call (one mixed track) instead of a Discord voice channel. */
-  meet?: { url: string; code: string };
-  startedBy: { id: string; name: string };
   startedAt: number;
   endedAt?: number;
   endReason?: string;
@@ -53,6 +43,41 @@ export interface Manifest {
   };
   error?: string;
 }
+
+/** A Discord voice channel recording; its minutes are posted in Discord. */
+export interface DiscordManifest extends ManifestBase {
+  meet?: undefined;
+  guildId: string;
+  guildName: string;
+  voiceChannelId: string;
+  voiceChannelName: string;
+  /** Text channel where /record was used (fallback output + continue prompts). */
+  commandChannelId: string;
+  startedBy: { id: string; name: string };
+}
+
+/** Which Google Meet call is recorded, for whom, and who gets the minutes. */
+export interface MeetInfo {
+  url: string;
+  code: string;
+  /** The calendar event title, or "Google Meet <code>" for a start on the web page. */
+  title: string;
+  trigger: "calendar" | "web";
+  /** Email of the calendar organizer or of the person who pressed start; failure emails go here. */
+  startedBy: string;
+  /** Who gets the minutes by email: lowercase, unique, includes startedBy, never the bot account. */
+  recipients: string[];
+}
+
+/** A Google Meet recording (one mixed track); its minutes are emailed. */
+export interface MeetManifest extends ManifestBase {
+  meet: MeetInfo;
+}
+
+export type Manifest = DiscordManifest | MeetManifest;
+
+/** Shown on the playback page and in the transcript header. */
+export const meetingTitle = (m: Manifest): string => (m.meet ? m.meet.title : m.voiceChannelName);
 
 export const meetingDir = (id: string) => join(config().DATA_DIR, "meetings", id);
 

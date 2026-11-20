@@ -1,10 +1,11 @@
 import { readFileSync, rmSync } from "node:fs";
-import type { Client } from "discord.js";
 import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
-import { meetingDir, saveEverywhere, saveLocal, type Manifest } from "../storage/manifest.js";
+import { consentMissingMail, describeMeetEnd, notRecordedMail, type Mail } from "../email/messages.js";
+import { sendEmail } from "../email/send.js";
+import { meetingDir, saveEverywhere, saveLocal, type MeetInfo, type MeetManifest } from "../storage/manifest.js";
 import { logger } from "../util/log.js";
 import { newSessionId } from "../util/pin.js";
-import { MEET_PARTICIPANT_ID, type EndReason, type RecordingEnd, type RecordingStatus } from "./protocol.js";
+import { MEET_PARTICIPANT_ID, type RecordingState, type RecordingStatus } from "./protocol.js";
 import { recorder } from "./recorder-client.js";
 
 const log = logger("meet");
@@ -16,7 +17,10 @@ const TICK_MS = 15_000;
 export const GIVE_UP_GRACE_MS = 60 * 60_000;
 export const MEET_SPEAKER_NAME = "เสียงรวมจาก Google Meet";
 
-type OnFinished = (manifest: Manifest) => void;
+type OnFinished = (manifest: MeetManifest) => void;
+
+/** How the web page and the calendar poller start a recording (src/index.ts binds the processing callback). */
+export type StartMeet = (meet: MeetInfo) => Promise<MeetSession>;
 
 /** The meet-recorder Worker runs at most this many containers (max_instances in meet/wrangler.jsonc). */
 export const MAX_MEET_RECORDINGS = 2;
@@ -36,8 +40,8 @@ export class MeetRefused extends Error {
 }
 
 /**
- * A Google Meet recording. The meet-recorder Worker's container (meet/) does the recording;
- * this side owns the manifest, polls the recorder, talks to Discord, and hands the result to processing.
+ * A Google Meet recording. The meet-recorder Worker's container (meet/) does the recording; this side owns
+ * the manifest, polls the recorder, emails the starter about problems, and hands the result to processing.
  */
 export class MeetSession {
   private tick?: NodeJS.Timeout;
@@ -45,49 +49,37 @@ export class MeetSession {
   private readonly giveUpAt: number;
   private stopReason?: string;
   private finishing?: Promise<void>;
+  /** What the recorder reported last; the web page shows it. */
+  state: RecordingState = "starting";
 
   private constructor(
-    private readonly client: Client,
-    readonly manifest: Manifest,
+    readonly manifest: MeetManifest,
     private readonly onFinished: OnFinished,
   ) {
     this.giveUpAt = manifest.startedAt + MEET_ADMIT_TIMEOUT_MS + config().MEET_MAX_DURATION_MIN * 60_000 + GIVE_UP_GRACE_MS;
   }
 
-  static async start(o: {
-    client: Client;
-    guildId: string;
-    guildName: string;
-    commandChannelId: string;
-    startedBy: { id: string; name: string };
-    meet: { url: string; code: string };
-    onFinished: OnFinished;
-  }): Promise<MeetSession> {
-    if (activeMeets.has(o.meet.code)) throw new MeetRefused("already_recording");
+  /** Sends the bot into `meet`. The starter always gets the minutes too. Throws MeetRefused when a limit is reached. */
+  static async start(meet: MeetInfo, onFinished: OnFinished): Promise<MeetSession> {
+    if (activeMeets.has(meet.code)) throw new MeetRefused("already_recording");
     if (activeMeets.size >= MAX_MEET_RECORDINGS) throw new MeetRefused("busy");
     const c = config();
     const now = Date.now();
-    const manifest: Manifest = {
+    const manifest: MeetManifest = {
       id: newSessionId(),
-      guildId: o.guildId,
-      guildName: o.guildName,
-      voiceChannelId: o.meet.code,
-      voiceChannelName: `Google Meet ${o.meet.code}`,
-      commandChannelId: o.commandChannelId,
-      meet: o.meet,
-      startedBy: o.startedBy,
+      meet: { ...meet, recipients: [...new Set([meet.startedBy, ...meet.recipients])] },
       startedAt: now,
       heartbeatAt: now,
       status: "recording",
       participants: {},
     };
-    const s = new MeetSession(o.client, manifest, o.onFinished);
-    activeMeets.set(o.meet.code, s);
+    const s = new MeetSession(manifest, onFinished);
+    activeMeets.set(meet.code, s);
     try {
       // Saved before the recorder starts, so recoverUnfinished() re-attaches if this process dies right after.
       saveLocal(manifest);
       await recorder.start(manifest.id, {
-        meetUrl: o.meet.url,
+        meetUrl: meet.url,
         authState: c.MEET_AUTH_STATE_FILE ? readAuthState(c.MEET_AUTH_STATE_FILE) : undefined,
         sampleRate: SAMPLE_RATE,
         segmentSamples: SEGMENT_SAMPLES,
@@ -98,20 +90,20 @@ export class MeetSession {
     } catch (err) {
       // The request may have reached the Worker even though it failed here (a timeout): make sure no bot joins.
       recorder.stop(manifest.id).catch(() => {});
-      activeMeets.delete(o.meet.code);
+      activeMeets.delete(meet.code);
       rmSync(meetingDir(manifest.id), { recursive: true, force: true });
       throw err;
     }
     await s.save();
     s.tick = setInterval(() => void s.poll(), TICK_MS);
-    log.info(`recording Google Meet ${o.meet.code} as ${manifest.id} (${o.guildName})`);
+    log.info(`recording Google Meet ${meet.code} as ${manifest.id} (${meet.trigger}, started by ${meet.startedBy})`);
     return s;
   }
 
   /** Re-attach to a recording that kept running on Cloudflare while this process restarted. */
-  static resume(client: Client, manifest: Manifest, onFinished: OnFinished): MeetSession {
-    const s = new MeetSession(client, manifest, onFinished);
-    activeMeets.set(manifest.meet!.code, s);
+  static resume(manifest: MeetManifest, onFinished: OnFinished): MeetSession {
+    const s = new MeetSession(manifest, onFinished);
+    activeMeets.set(manifest.meet.code, s);
     s.tick = setInterval(() => void s.poll(), TICK_MS);
     void s.poll();
     log.info(`re-attached to Google Meet recording ${manifest.id}`);
@@ -123,22 +115,22 @@ export class MeetSession {
   }
 
   private get code(): string {
-    return this.manifest.meet!.code;
+    return this.manifest.meet.code;
   }
 
-  /** Asks the recorder to leave the call; processing starts when it reports the end. */
+  /** True once someone asked the recorder to stop. */
+  get stopping(): boolean {
+    return this.stopReason !== undefined;
+  }
+
+  /**
+   * Asks the recorder to leave the call; processing starts when it reports the end.
+   * Throws when the recorder cannot be reached (it still stops by itself when the call empties or hits the limit).
+   */
   async end(reason: string): Promise<void> {
     if (this.finishing) return;
+    await recorder.stop(this.id);
     this.stopReason ??= reason;
-    try {
-      await recorder.stop(this.id);
-    } catch (err) {
-      log.warn(`could not ask the Google Meet recorder to stop ${this.id}`, err);
-      await this.say(
-        `I could not reach the Google Meet recorder to stop **${this.code}**. ` +
-          "It stops by itself when the call is empty or reaches the time limit, and the minutes follow then.",
-      );
-    }
   }
 
   /** The recording goes on in the cloud; boot re-attaches to it. */
@@ -159,6 +151,7 @@ export class MeetSession {
         if (Date.now() >= this.giveUpAt) await this.finish(undefined);
         return;
       }
+      if (status) this.state = status.state;
       if (status?.state === "recording" && !this.manifest.participants[MEET_PARTICIPANT_ID]) {
         await this.recordingStarted(status);
       }
@@ -186,10 +179,8 @@ export class MeetSession {
       uploaded: [],
     };
     await this.save();
-    await this.say(
-      `🔴 I am recording the Google Meet call ${this.code}` +
-        (status.consentPosted ? "" : ". I could not post the recording notice in the Meet chat, so please tell the participants."),
-    );
+    // The Meet chat notice is the only consent notice; if it failed, the starter has to tell people.
+    if (!status.consentPosted) await this.email(consentMissingMail({ title: this.manifest.meet.title, code: this.code }));
   }
 
   private finish(status: RecordingStatus | undefined): Promise<void> {
@@ -203,14 +194,14 @@ export class MeetSession {
     const m = this.manifest;
     const end = status?.end;
     const segments = status?.segments ?? [];
-    m.endReason = this.stopReason ?? describeEnd(end?.reason);
+    m.endReason = this.stopReason ?? describeMeetEnd(end?.reason);
 
     if (!status || status.captureStartedAt === undefined || segments.length === 0) {
       m.status = "failed";
       m.endedAt = Date.now();
       m.error = `nothing was recorded (${end ? `${end.reason}${end.detail ? `: ${end.detail}` : ""}` : "the recorder lost this recording"})`;
       await this.save();
-      await this.say(notRecordedMessage(this.code, end));
+      await this.email(notRecordedMail({ title: m.meet.title, code: this.code, end }));
       log.warn(`Google Meet recording ${m.id} ended without audio: ${m.error}`);
       return;
     }
@@ -243,12 +234,13 @@ export class MeetSession {
     }
   }
 
-  private async say(text: string): Promise<void> {
+  /** Emails the person who started the recording; a failed email is logged, never fatal. */
+  private async email(mail: Mail): Promise<void> {
+    const to = this.manifest.meet.startedBy;
     try {
-      const channel = await this.client.channels.fetch(this.manifest.commandChannelId);
-      if (channel?.isSendable()) await channel.send(text);
+      await sendEmail({ to, ...mail });
     } catch (err) {
-      log.warn(`could not post in the command channel for ${this.id}`, err);
+      log.error(`could not email ${to} about Google Meet recording ${this.id}`, err);
     }
   }
 }
@@ -266,51 +258,4 @@ function readAuthState(path: string): string {
     throw new Error("the bot account session file (MEET_AUTH_STATE_FILE) is missing or not valid JSON");
   }
   return text;
-}
-
-function describeEnd(reason: EndReason | undefined): string {
-  switch (reason) {
-    case "stopped":
-      return "ended with /end";
-    case "alone":
-      return `everyone left the Google Meet call for ${config().EMPTY_CHANNEL_TIMEOUT_MIN} minutes`;
-    case "removed":
-      return "the bot was removed from the Google Meet call";
-    case "meeting_ended":
-      return "the Google Meet call ended";
-    case "max_duration":
-      return `the recording reached the ${config().MEET_MAX_DURATION_MIN}-minute limit`;
-    case "not_admitted":
-      return "nobody let the bot into the Google Meet call";
-    case "denied":
-      return "the bot was not allowed to join the Google Meet call";
-    case "auth_expired":
-      return "the bot's Google account session expired";
-    case "join_failed":
-      return "the Google Meet page offered no way to join";
-    default:
-      return "the Google Meet recorder stopped unexpectedly";
-  }
-}
-
-function notRecordedMessage(code: string, end: RecordingEnd | undefined): string {
-  if (end?.detail?.startsWith("container start failed")) {
-    return `I could not start a recorder for Google Meet **${code}**. At most 2 Meet recordings run at once; please try again later.`;
-  }
-  const reason = end?.reason;
-  switch (reason) {
-    case "auth_expired":
-      return (
-        `I could not join Google Meet **${code}**: the bot's Google account session has expired. ` +
-        "An admin needs to run `npm run meet:login` in meet/ and replace the session file on the server (MEET_AUTH_STATE_FILE)."
-      );
-    case "not_admitted":
-      return `Nobody let the bot into Google Meet **${code}** within ${MEET_ADMIT_TIMEOUT_MS / 60_000} minutes, so nothing was recorded.`;
-    case "denied":
-      return `Google Meet **${code}** did not let the bot join (the host denied it or Meet refused it), so nothing was recorded.`;
-    case "stopped":
-      return `Recording of Google Meet **${code}** was stopped before the bot got in, so nothing was recorded.`;
-    default:
-      return `I could not record Google Meet **${code}** (${describeEnd(reason)}).`;
-  }
 }

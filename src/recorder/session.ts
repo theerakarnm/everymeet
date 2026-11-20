@@ -19,7 +19,7 @@ import {
 } from "@discordjs/voice";
 import OpusScript from "opusscript";
 import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
-import { meetingDir, saveEverywhere, saveLocal, type Manifest } from "../storage/manifest.js";
+import { meetingDir, saveEverywhere, saveLocal, type DiscordManifest, type Manifest } from "../storage/manifest.js";
 import { newSessionId } from "../util/pin.js";
 import { logger } from "../util/log.js";
 import { TrackWriter, segmentPath } from "./track-writer.js";
@@ -38,7 +38,7 @@ export const activeSessions = new Map<string, MeetingSession>();
 type OnFinished = (manifest: Manifest) => void;
 
 export class MeetingSession {
-  readonly manifest: Manifest;
+  readonly manifest: DiscordManifest;
   private connection!: VoiceConnection;
   private readonly writers = new Map<string, TrackWriter>();
   private readonly uploader: SegmentUploader;
