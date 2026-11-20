@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import "../test/setup.js";
@@ -60,4 +60,10 @@ test("starts are counted over a rolling 24 hours and kept across restarts; a dam
   assert.match(readFileSync(path, "utf8"), /secret@/, "the damaged file is left as it was");
   writeFileSync(path, "{}");
   assert.throws(() => new UserStore(path), /not valid JSON/, "valid JSON of the wrong shape is refused the same way");
+});
+
+test("the file is readable by the bot user only", () => {
+  const path = tempFile();
+  new UserStore(path).signIn("eve@example.com", 1_000);
+  assert.equal(statSync(path).mode & 0o777, 0o600);
 });

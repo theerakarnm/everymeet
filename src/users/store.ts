@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, fchmodSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { config } from "../config.js";
 
@@ -94,11 +94,26 @@ export class UserStore {
     this.save();
   }
 
+  /** The file holds every address, so only the bot user may read it; fsync makes the rename survive a power cut. */
   private save(): void {
-    mkdirSync(dirname(this.path), { recursive: true });
+    const dir = dirname(this.path);
+    mkdirSync(dir, { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ users: this.list() }, null, 2));
+    const fd = openSync(tmp, "w", 0o600);
+    try {
+      fchmodSync(fd, 0o600); // a temp file left over from a crash keeps its old mode otherwise
+      writeSync(fd, JSON.stringify({ users: this.list() }, null, 2));
+      fsyncSync(fd);
+    } finally {
+      closeSync(fd);
+    }
     renameSync(tmp, this.path); // atomic replace
+    const dirFd = openSync(dir, "r");
+    try {
+      fsyncSync(dirFd);
+    } finally {
+      closeSync(dirFd);
+    }
   }
 }
 
