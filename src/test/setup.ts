@@ -28,6 +28,11 @@ Object.assign(process.env, {
   MEET_RECORDER_URL: "https://meet-recorder.example.com",
   MEET_RECORDER_TOKEN: "m".repeat(40),
   MEET_AUTH_STATE_FILE: join(dataDir, "meet-auth.json"),
+  ALLOWED_EMAILS: "alice@example.com, @planthia.test",
+  MEET_BOT_EMAIL: "bot@example.com",
+  CALENDAR_ICAL_URL: "https://calendar.example.com/calendar/ical/bot/private-secret/basic.ics",
+  RESEND_API_KEY: `re_${"e".repeat(40)}`,
+  EMAIL_FROM: "minutes@example.com",
 });
 
 /** Objects "uploaded" to R2, by key. */

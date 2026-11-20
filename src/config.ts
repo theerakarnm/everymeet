@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { invalidAllowlistEntries, parseAllowlist } from "./util/email.js";
 
 const bool = z
   .string()
@@ -49,7 +50,7 @@ const schema = z.object({
     .optional()
     .transform((v) => v !== "false"),
 
-  /** Origin of the meet-recorder Worker (meet/). /record-meet is off when unset. */
+  /** Origin of the meet-recorder Worker (meet/). Google Meet recording is off when unset. */
   MEET_RECORDER_URL: z.preprocess(blank, z.url().optional()),
   /** Same value as the Worker secret RECORDER_TOKEN. */
   MEET_RECORDER_TOKEN: z.preprocess(blank, z.string().min(32).optional()),
@@ -57,9 +58,34 @@ const schema = z.object({
   MEET_AUTH_STATE_FILE: z.preprocess(blank, z.string().optional()),
   /** A Google Meet recording ends after this many minutes; the Worker refuses more than 6 h. */
   MEET_MAX_DURATION_MIN: z.coerce.number().positive().max(360).default(240),
-}).refine((c) => !c.MEET_RECORDER_URL === !c.MEET_RECORDER_TOKEN, {
-  message: "set MEET_RECORDER_URL and MEET_RECORDER_TOKEN together",
-  path: ["MEET_RECORDER_TOKEN"],
+  /** Who may start Google Meet recordings (web page, calendar organizers): emails and whole domains as "@example.com", comma separated. */
+  ALLOWED_EMAILS: z.preprocess(blank, z.string().optional()).transform(parseAllowlist),
+  /** The bot Google account people invite; it never gets the minutes. Needed for calendar starts. */
+  MEET_BOT_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
+  /** The bot account's "Secret address in iCal format". A secret: never log it. Calendar starts are off when unset. */
+  CALENDAR_ICAL_URL: z.preprocess(blank, z.url().optional()),
+  /** Resend API key with "Sending access" for the sender's domain. A secret: never log it. */
+  RESEND_API_KEY: z.preprocess(blank, z.string().startsWith("re_").optional()),
+  /** Sender on a domain verified in Resend, e.g. minutes@mail.example.com. */
+  EMAIL_FROM: z.preprocess(blank, z.email().optional()),
+}).superRefine((c, ctx) => {
+  const need = (ok: unknown, path: string, message: string) => {
+    if (!ok) ctx.addIssue({ code: "custom", path: [path], message });
+  };
+  need(!c.MEET_RECORDER_URL === !c.MEET_RECORDER_TOKEN, "MEET_RECORDER_TOKEN", "set MEET_RECORDER_URL and MEET_RECORDER_TOKEN together");
+  if (c.MEET_RECORDER_URL) {
+    // Meet recordings are started on the web page or by calendar invitation and report by email only.
+    need(c.RESEND_API_KEY, "RESEND_API_KEY", "Google Meet recording sends its minutes by email: set RESEND_API_KEY");
+    need(c.EMAIL_FROM, "EMAIL_FROM", "Google Meet recording sends its minutes by email: set EMAIL_FROM");
+    need(c.ALLOWED_EMAILS.emails.length + c.ALLOWED_EMAILS.domains.length > 0, "ALLOWED_EMAILS", "set who may start Google Meet recordings");
+  }
+  if (c.CALENDAR_ICAL_URL) {
+    need(c.MEET_RECORDER_URL, "CALENDAR_ICAL_URL", "calendar starts need MEET_RECORDER_URL and MEET_RECORDER_TOKEN");
+    need(c.MEET_BOT_EMAIL, "MEET_BOT_EMAIL", "calendar starts need MEET_BOT_EMAIL");
+  }
+  for (const bad of invalidAllowlistEntries(c.ALLOWED_EMAILS)) {
+    need(false, "ALLOWED_EMAILS", `"${bad}" is neither an email address nor an @domain`);
+  }
 });
 
 export type Config = z.infer<typeof schema>;
