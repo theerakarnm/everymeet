@@ -1,5 +1,5 @@
 import { Hono, type Context } from "hono";
-import { getCookie, setCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { csrf } from "hono/csrf";
 import { config } from "../config.js";
 import { loginMail } from "../email/messages.js";
@@ -112,6 +112,11 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
       maxAge: USER_TTL_MS / 1000,
     });
     log.info(`${email} signed in to the Google Meet page${isNew ? " (new account)" : ""}`);
+    return c.redirect("/meet", 303);
+  });
+
+  app.post("/logout", (c) => {
+    deleteCookie(c, USER_COOKIE, { path: "/meet", secure: base().startsWith("https://") });
     return c.redirect("/meet", 303);
   });
 

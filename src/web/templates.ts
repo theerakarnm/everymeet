@@ -29,6 +29,8 @@ li.rec small{display:block;color:var(--muted);font-size:13px}
 li.rec form{flex:none}
 button.stop{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--err);border:1px solid var(--err)}
 button.enable{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--accent);border:1px solid var(--accent)}
+form.inline{display:inline}
+button.link{width:auto;margin:12px 0 0;padding:0;background:none;border-radius:0;color:var(--accent);font-size:14px;font-weight:400;text-decoration:underline}
 button{margin-top:16px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
 .err{color:var(--err);font-size:14px;margin:12px 0 0}
 audio{width:100%;margin:8px 0 20px}
@@ -184,7 +186,7 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <button type="submit">เริ่มบันทึก</button></form>
 <h2>การบันทึกของคุณ</h2>
 ${items ? `<ul>${items}</ul>` : `<p class="meta">ยังไม่มีการบันทึกที่กำลังทำงาน</p>`}
-<a class="refresh" href="/meet">รีเฟรชสถานะ</a>${o.isAdmin ? ` · <a class="refresh" href="/meet/admin">จัดการผู้ใช้</a>` : ""}`,
+<a class="refresh" href="/meet">รีเฟรชสถานะ</a>${o.isAdmin ? ` · <a class="refresh" href="/meet/admin">จัดการผู้ใช้</a>` : ""} · <form class="inline" method="post" action="/meet/logout"><button class="link" type="submit">ออกจากระบบ</button></form>`,
     );
   },
 

@@ -245,3 +245,18 @@ test("the admin pages answer 404 to people who are not admins and to signed-out 
   assert.equal((await post("/meet/admin/status", { email: "olga@planthia.test", status: "disabled" }, { cookie: olga })).status, 404);
   assert.equal(users().get("olga@planthia.test")?.status, "active");
 });
+
+test("logging out clears the cookie and goes back to the login page; the logout form is on the recorder page and refused from other sites", async () => {
+  const cookie = await signIn("lou@example.com");
+  assert.match(await (await get("/meet", cookie)).text(), /<form[^>]*method="post" action="\/meet\/logout"/);
+  const crossSite = await app.request("/meet/logout", {
+    method: "POST",
+    headers: { "content-type": "application/x-www-form-urlencoded", cookie, origin: "https://evil.test" },
+  });
+  assert.equal(crossSite.status, 403);
+  const out = await post("/meet/logout", {}, { cookie });
+  assert.equal(out.status, 303);
+  assert.equal(out.headers.get("location"), "/meet");
+  const cleared = out.headers.get("set-cookie") ?? "";
+  for (const part of [/^mu=;/, /Max-Age=0/i, /Path=\/meet/]) assert.match(cleared, part);
+});

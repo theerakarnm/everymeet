@@ -17,6 +17,8 @@ export function createLoginLink(email: string): string {
 /** The email the link was made for, exactly once; an unknown, used, or expired token gives undefined. */
 export function consumeLoginLink(token: string): string | undefined {
   const link = pending.get(token);
-  pending.delete(token);
-  return link && link.expiresAt >= Date.now() ? link.email : undefined;
+  if (!link) return undefined;
+  // Signing in once ends every other link of that address, so an older email can no longer be used.
+  for (const [t, other] of pending) if (other.email === link.email) pending.delete(t);
+  return link.expiresAt >= Date.now() ? link.email : undefined;
 }

@@ -47,3 +47,12 @@ test("the rate limit allows max attempts per key per window", () => {
   mock.timers.tick(15 * 60_000);
   assert.equal(limit.take("10.0.0.1"), true, "a new window");
 });
+
+test("using one login link voids the other unused links of that address only", () => {
+  const first = createLoginLink("alice@example.com");
+  const second = createLoginLink("alice@example.com");
+  const bob = createLoginLink("bob@example.com");
+  assert.equal(consumeLoginLink(second), "alice@example.com");
+  assert.equal(consumeLoginLink(first), undefined, "an older link of the same address no longer works");
+  assert.equal(consumeLoginLink(bob), "bob@example.com");
+});
