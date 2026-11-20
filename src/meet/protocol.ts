@@ -12,7 +12,7 @@ export const CALLBACK_HOST = "meet-recorder.internal";
 export type RecordingState = "starting" | "joining" | "waiting" | "recording" | "ended";
 
 export type EndReason =
-  | "stopped" // /end in Discord
+  | "stopped" // someone pressed stop on the web page
   | "alone" // only the bot left in the call
   | "removed" // a host removed the bot
   | "meeting_ended" // the call ended or its UI disappeared
@@ -31,6 +31,7 @@ export interface RecordingJob {
   authState?: string;
   sampleRate: number;
   segmentSamples: number;
+  /** How long the bot waits in the lobby to be let in, and then for anyone else to join the call. */
   admitTimeoutMs: number;
   aloneTimeoutMs: number;
   maxDurationMs: number;
@@ -67,6 +68,6 @@ export type RunnerEvent =
   | ({ type: "ended" } & RecordingEnd);
 
 export interface EventReply {
-  /** True once /end was used in Discord; the container leaves the call. */
+  /** True once someone asked to stop; the container leaves the call. */
   stop: boolean;
 }

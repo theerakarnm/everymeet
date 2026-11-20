@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { nextEnd, type CallObservation, type RuleState } from "./rules.js";
 
 const MIN = 60_000;
-const config = { aloneTimeoutMs: 3 * MIN, maxDurationMs: 240 * MIN, lostUiMs: 30_000 };
+const config = { aloneTimeoutMs: 3 * MIN, waitForOthersMs: 15 * MIN, maxDurationMs: 240 * MIN, lostUiMs: 30_000 };
 const inCall = (participants?: number): CallObservation => ({ inCall: true, participants });
 const fresh = (): RuleState => ({ recordingSince: 0 });
 
@@ -41,4 +41,20 @@ test("the call UI gone for 30 s ends the recording, a shorter blip does not", ()
 
 test("the maximum duration ends even a busy call", () => {
   assert.equal(nextEnd({ recordingSince: 1_000 }, inCall(8), 1_000 + 240 * MIN, false, config), "max_duration");
+});
+
+test("before anyone else has joined, the bot waits the longer time for the first person", () => {
+  const s = fresh();
+  assert.equal(nextEnd(s, inCall(1), 0, false, config), undefined);
+  assert.equal(nextEnd(s, inCall(1), 3 * MIN, false, config), undefined, "the 3-minute rule waits for someone to have come");
+  assert.equal(nextEnd(s, inCall(1), 15 * MIN - 1, false, config), undefined);
+  assert.equal(nextEnd(s, inCall(1), 15 * MIN, false, config), "alone");
+});
+
+test("once someone came and left, the normal alone time applies", () => {
+  const s = fresh();
+  assert.equal(nextEnd(s, inCall(1), 0, false, config), undefined);
+  assert.equal(nextEnd(s, inCall(2), 10 * MIN, false, config), undefined, "the first person arrives late");
+  assert.equal(nextEnd(s, inCall(1), 40 * MIN, false, config), undefined, "they left");
+  assert.equal(nextEnd(s, inCall(1), 43 * MIN, false, config), "alone");
 });

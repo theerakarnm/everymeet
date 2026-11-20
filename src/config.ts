@@ -110,3 +110,6 @@ export const BYTES_PER_SAMPLE = 2;
 /** Recording is cut into 5-minute segments that are uploaded to R2 while the meeting runs. */
 export const SEGMENT_SECONDS = 300;
 export const SEGMENT_SAMPLES = SAMPLE_RATE * SEGMENT_SECONDS;
+
+/** How long a Google Meet bot waits to be let in, and then for the first person to join (the recorder Worker allows at most 15 min). */
+export const MEET_ADMIT_TIMEOUT_MS = 15 * 60_000;

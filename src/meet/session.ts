@@ -1,6 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import type { Client } from "discord.js";
-import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
+import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { activeSessions, type ActiveRecording } from "../recorder/active.js";
 import { meetingDir, saveEverywhere, saveLocal, type Manifest } from "../storage/manifest.js";
 import { logger } from "../util/log.js";
@@ -10,8 +10,6 @@ import { recorder } from "./recorder-client.js";
 
 const log = logger("meet");
 const TICK_MS = 15_000;
-/** How long the bot waits in the Meet lobby for someone to let it in. */
-export const ADMIT_TIMEOUT_MS = 5 * 60_000;
 /**
  * While the recorder is unreachable the bot keeps polling; it gives up only this long after the recorder's
  * own hard deadline (admit timeout + max duration + 10 min), when the recorder must have ended.
@@ -37,7 +35,7 @@ export class MeetSession implements ActiveRecording {
     readonly manifest: Manifest,
     private readonly onFinished: OnFinished,
   ) {
-    this.giveUpAt = manifest.startedAt + ADMIT_TIMEOUT_MS + config().MEET_MAX_DURATION_MIN * 60_000 + GIVE_UP_GRACE_MS;
+    this.giveUpAt = manifest.startedAt + MEET_ADMIT_TIMEOUT_MS + config().MEET_MAX_DURATION_MIN * 60_000 + GIVE_UP_GRACE_MS;
   }
 
   static async start(o: {
@@ -75,7 +73,7 @@ export class MeetSession implements ActiveRecording {
         authState: c.MEET_AUTH_STATE_FILE ? readAuthState(c.MEET_AUTH_STATE_FILE) : undefined,
         sampleRate: SAMPLE_RATE,
         segmentSamples: SEGMENT_SAMPLES,
-        admitTimeoutMs: ADMIT_TIMEOUT_MS,
+        admitTimeoutMs: MEET_ADMIT_TIMEOUT_MS,
         aloneTimeoutMs: c.EMPTY_CHANNEL_TIMEOUT_MIN * 60_000,
         maxDurationMs: c.MEET_MAX_DURATION_MIN * 60_000,
       });
@@ -289,7 +287,7 @@ function notRecordedMessage(code: string, end: RecordingEnd | undefined): string
         "An admin needs to run `npm run meet:login` in meet/ and replace the session file on the server (MEET_AUTH_STATE_FILE)."
       );
     case "not_admitted":
-      return `Nobody let the bot into Google Meet **${code}** within ${ADMIT_TIMEOUT_MS / 60_000} minutes, so nothing was recorded.`;
+      return `Nobody let the bot into Google Meet **${code}** within ${MEET_ADMIT_TIMEOUT_MS / 60_000} minutes, so nothing was recorded.`;
     case "denied":
       return `Google Meet **${code}** did not let the bot join (the host denied it or Meet refused it), so nothing was recorded.`;
     case "stopped":

@@ -41,7 +41,7 @@ async function attend(page: MeetPage, job: RecordingJob): Promise<RecordingEnd> 
   stopRequested ||= (await sendEvent({ type: "recording", captureStartedAt: capture.startedAt, consentPosted })).stop;
 
   const state: RuleState = { recordingSince: capture.startedAt };
-  const rules = { aloneTimeoutMs: job.aloneTimeoutMs, maxDurationMs: job.maxDurationMs, lostUiMs: LOST_UI_MS };
+  const rules = { aloneTimeoutMs: job.aloneTimeoutMs, waitForOthersMs: job.admitTimeoutMs, maxDurationMs: job.maxDurationMs, lostUiMs: LOST_UI_MS };
   let reason: EndReason | undefined;
   let detail: string | undefined;
   // Whatever happens in the loop or while leaving, the open segment is flushed and uploaded before "ended" goes out.

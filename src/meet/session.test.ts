@@ -66,7 +66,7 @@ test("starting sends the link, the session file and the timings to the recorder,
     authState: FAKE_MEET_AUTH,
     sampleRate: SAMPLE_RATE,
     segmentSamples: SEGMENT_SAMPLES,
-    admitTimeoutMs: 5 * MIN,
+    admitTimeoutMs: 15 * MIN,
     aloneTimeoutMs: 3 * MIN,
     maxDurationMs: 240 * MIN,
   });
@@ -136,7 +136,7 @@ test("/end asks the recorder to stop and keeps the Discord reason once the recor
 test("a call the bot never got into is marked failed with a reason-specific message and is not processed", async () => {
   for (const [reason, expected] of [
     ["denied", /did not let the bot join/],
-    ["not_admitted", /Nobody let the bot into Google Meet \*\*abc-defg-hij\*\* within 5 minutes/],
+    ["not_admitted", /Nobody let the bot into Google Meet \*\*abc-defg-hij\*\* within 15 minutes/],
     ["auth_expired", /session has expired.*npm run meet:login/],
     ["stopped", /stopped before the bot got in/],
     ["join_failed", /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet page offered no way to join\)/],
@@ -191,7 +191,7 @@ test("the bot gives up only after the recorder's own deadline has passed, and te
   const h = harness();
   await h.start();
   worker.down = true;
-  const giveUp = (5 + 240 + 60) * MIN; // admit timeout + MEET_MAX_DURATION_MIN + GIVE_UP_GRACE_MS
+  const giveUp = (15 + 240 + 60) * MIN; // admit timeout + MEET_MAX_DURATION_MIN + GIVE_UP_GRACE_MS
   await advance(giveUp - 15_000);
   assert.ok(activeSessions.get(h.guildId), "still following");
   await advance(15_000);
