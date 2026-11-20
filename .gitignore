@@ -6,3 +6,6 @@ data
 .env.spike
 rust/**/target/
 rust/spikes/**/spike-out/
+secrets/
+meet/auth/meet-auth.json
+meet/auth/recorder-token
