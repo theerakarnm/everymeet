@@ -147,12 +147,13 @@ async function emailMinutes(m: MeetManifest, recipients: string[], o: { pin: str
 }
 
 /**
- * After a crash or restart: meetings that were still recording are closed at
- * their last heartbeat and processed; meetings that were mid-processing are retried.
+ * After a crash or restart. Google Meet recordings ran on in the cloud and are re-attached; Discord recordings
+ * are closed at their last heartbeat. Meetings that were mid-processing are retried. Meet needs no Discord login,
+ * so boot runs "meet" first and "discord" once the client is ready.
  */
-export async function recoverUnfinished(client: Client): Promise<void> {
+export async function recoverUnfinished(client: Client, source: "meet" | "discord"): Promise<void> {
   for (const m of unfinishedLocal()) {
-    // A Google Meet recording runs on Cloudflare, so it survived the restart: keep following it.
+    if ((source === "meet") !== !!m.meet) continue;
     if (m.meet && m.status === "recording") {
       MeetSession.resume(m, (done) => void processMeeting(client, done));
       continue;

@@ -14,7 +14,7 @@ mockR2();
 let failEmailTo = (_to: string) => false;
 mockEmail({ fail: (to) => failEmailTo(to) });
 const { processMeeting, recoverUnfinished } = await import("./run.js");
-const { saveLocal, meetingDir } = await import("../storage/manifest.js");
+const { loadLocal, saveLocal, meetingDir } = await import("../storage/manifest.js");
 const { keys } = await import("../storage/keys.js");
 const { TrackWriter } = await import("../recorder/track-writer.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
@@ -252,7 +252,9 @@ test("after a crash mid-meeting, the recording is closed at the last heartbeat a
   saveLocal(m as any);
   openRouter();
   const { client, posts } = discord(["meeting-of-minutes"]);
-  await recoverUnfinished(client);
+  await recoverUnfinished(client, "meet");
+  assert.equal(loadLocal(m.id)?.status, "recording", "Meet recovery leaves Discord meetings to the Discord login");
+  await recoverUnfinished(client, "discord");
   const deadline = performance.now() + 20_000;
   while (posts.length === 0 && performance.now() < deadline) await flush();
 

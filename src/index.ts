@@ -23,7 +23,7 @@ client.on(Events.VoiceStateUpdate, handleVoiceStateUpdate);
 
 client.once(Events.ClientReady, async (ready) => {
   log.info(`logged in as ${ready.user.tag}`);
-  await recoverUnfinished(client);
+  await recoverUnfinished(client, "discord");
 });
 
 async function shutdown(signal: string) {
@@ -39,5 +39,7 @@ process.on("SIGINT", () => void shutdown("SIGINT"));
 process.on("SIGTERM", () => void shutdown("SIGTERM"));
 process.on("unhandledRejection", (err) => log.error("unhandled rejection", err));
 
+// Google Meet recordings run on Cloudflare and need no Discord login: re-attach them before anything can start a new one.
+await recoverUnfinished(client, "meet");
 startWebServer();
 await client.login(c.DISCORD_TOKEN);
