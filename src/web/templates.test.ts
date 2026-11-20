@@ -28,7 +28,7 @@ test("the recorder page lists recordings with a Thai state and a stop button, an
   assert.match(html, /value="&quot;&gt;&lt;script&gt;"/);
   assert.match(html, /<textarea[^>]*>bob@example.com<\/textarea>/);
   assert.match(html, /class="err">ลิงก์นี้ไม่ใช่ลิงก์ Google Meet/);
-  assert.match(page.meetRecorder({ email: "a@b.co", recordings: [] }), /ยังไม่มีการบันทึกที่กำลังทำงาน/);
+  assert.match(page.meetRecorder({ email: "a@example.com", recordings: [] }), /ยังไม่มีการบันทึกที่กำลังทำงาน/);
 });
 
 test("the login pages post to /meet and the confirm page carries the token only in a form", () => {
