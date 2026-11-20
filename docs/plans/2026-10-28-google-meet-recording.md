@@ -62,7 +62,7 @@ Each decision states the chosen option and why, briefly.
    The 2-hour continue prompt is not ported: the hard limit is the cost guardrail and the alone rule ends abandoned calls.
 7. **Testing:** pure units with node:test in both packages (end rules, segment splitting, VAD, Meet URL parsing, Worker core state machine with fake ports, Worker HTTP auth and routing); the VPS `MeetSession` and `/record-meet` are driven through a scripted fake Worker (`fakeMeetRecorder()` in `src/test/setup.ts`); `src/pipeline/run.test.ts` gains a Meet end-to-end test with real ffmpeg and a FLAC segment that exists only in the in-memory R2.
    Nothing in either test suite talks to Discord, Google, Cloudflare, or OpenRouter.
-   The real Meet call is verified once in `## End-to-end verification` against the test room `https://meet.google.com/jku-cpry-bcg`.
+   The real Meet call is verified once in `## End-to-end verification` against the test room `https://meet.google.com/abc-defg-hij`.
 8. **Deployment:** `wrangler deploy` from `meet/` with podman, using the registry-tag procedure proven by the spike (Task 19): build the amd64 image with podman, `wrangler containers push`, then deploy a gitignored `wrangler.deploy.jsonc` whose `image` is the pushed registry tag.
    Guardrails: `instance_type: standard-2`, `max_instances: 2`, `setInactivityTimeout` and a Durable Object alarm at the hard deadline, the container is destroyed when the runner exits or reports `ended`, and Durable Object storage is deleted 7 days after the end.
    Measured cost from the spike: about $0.076 per recording hour on standard-2.
@@ -215,7 +215,7 @@ export class MeetSpike extends DurableObject<Env> {
     if (!c.running) {
       c.start({ enableInternet: true, entrypoint: ["sleep", "infinity"] });
 ```
-The stdin payload, `stdout: "ignore"`, `interceptOutboundHttp`, and `exitCode.then(stop)` follow Cellar (`/Users/jametirakarn/Desktop/Theerakarnm/Cellar/src/worker/container/job-runner.ts:25-51`, read-only reference, deployed 2026-10-26):
+The stdin payload, `stdout: "ignore"`, `interceptOutboundHttp`, and `exitCode.then(stop)` follow Cellar (`<path-to>/Cellar/src/worker/container/job-runner.ts:25-51`, read-only reference, deployed 2026-10-26):
 ```ts
     container.start({ enableInternet: true, entrypoint: ["sleep", "infinity"] });
     await container.setInactivityTimeout(Math.max(request.deadlineMs - Date.now(), 0) + GRACE_MS);
@@ -298,7 +298,7 @@ Root `package.json` and `package-lock.json` - no task changes them.
 #### Task 0: Prove that a container can upload 12 MB to R2 through `interceptOutboundHttp`
 
 **Files:**
-- Create (outside the repo, deleted at the end): `/Users/jametirakarn/everymeet-intercept-probe/wrangler.jsonc`, `/Users/jametirakarn/everymeet-intercept-probe/probe.ts`
+- Create (outside the repo, deleted at the end): `<scratch-dir>/everymeet-intercept-probe/wrangler.jsonc`, `<scratch-dir>/everymeet-intercept-probe/probe.ts`
 
 Uploads and events through `interceptOutboundHttp` are the only load-bearing assumption no one has run in production (Cellar never verified that path; the spike used exec stdout and a public Bearer route).
 This probe checks it with the spike image before Track C builds on it, including whether Node `fetch` in the container reaches `meet-recorder.internal` and whether a 12 MB body gets through (a 5-minute FLAC segment is 5-14 MB).
@@ -307,10 +307,10 @@ This probe checks it with the spike image before Track C builds on it, including
 - Consumes: the spike image already pushed to the Cloudflare registry (Preflight).
 - Produces: a yes/no for Decision 2; nothing in the repo.
 
-**Rollback:** `cd /Users/jametirakarn/everymeet-intercept-probe && npx wrangler delete --force && npx wrangler containers list` then `npx wrangler containers delete <ID>` for `everymeet-intercept-probe`; `npx wrangler r2 object delete meeting-recordings/probe/intercept-test.bin --remote`; `rm -rf /Users/jametirakarn/everymeet-intercept-probe`.
+**Rollback:** `cd <scratch-dir>/everymeet-intercept-probe && npx wrangler delete --force && npx wrangler containers list` then `npx wrangler containers delete <ID>` for `everymeet-intercept-probe`; `npx wrangler r2 object delete meeting-recordings/probe/intercept-test.bin --remote`; `rm -rf <scratch-dir>/everymeet-intercept-probe`.
 
 **Steps:**
-- [ ] Step 1: `mkdir -p /Users/jametirakarn/everymeet-intercept-probe && cd $_ && npm init -y >/dev/null && npm install wrangler@^4.154.0 >/dev/null && npx wrangler whoami | grep -ci "logged in"` prints at least 1 (if not, STOP and ask the user to log in).
+- [ ] Step 1: `mkdir -p <scratch-dir>/everymeet-intercept-probe && cd $_ && npm init -y >/dev/null && npm install wrangler@^4.154.0 >/dev/null && npx wrangler whoami | grep -ci "logged in"` prints at least 1 (if not, STOP and ask the user to log in).
       Find the newest spike image with `podman images --format '{{.Repository}}:{{.Tag}}' | grep meetspike | head -1` and use it as `<SPIKE_IMAGE>`.
 - [ ] Step 2: Create `wrangler.jsonc`:
       ```jsonc
@@ -372,7 +372,7 @@ This probe checks it with the spike image before Track C builds on it, including
       } satisfies ExportedHandler<Env>;
       ```
 - [ ] Step 3: `npx wrangler deploy`, then `(umask 077 && openssl rand -hex 24 > token) && npx wrangler secret put PROBE_TOKEN < token`, note the printed workers.dev URL as `<PROBE_URL>`, and wait 60 s.
-- [ ] Step 4: Verify - Manual: `curl -s -H "authorization: Bearer $(cat token)" <PROBE_URL>` (repeat every 30 s while it answers "no container instance available", "Could not resolve host" for a brand-new workers.dev subdomain, or "error code: 1101" HTTP 500 while the container is not ready), then `npx wrangler r2 object get meeting-recordings/probe/intercept-test.bin --remote --file /Users/jametirakarn/everymeet-intercept-probe/got.bin && wc -c < /Users/jametirakarn/everymeet-intercept-probe/got.bin` - Expected: the curl body is `200 {"stored":12582912,"path":"/segments/0"}` and `wc -c` prints `12582912`.
+- [ ] Step 4: Verify - Manual: `curl -s -H "authorization: Bearer $(cat token)" <PROBE_URL>` (repeat every 30 s while it answers "no container instance available", "Could not resolve host" for a brand-new workers.dev subdomain, or "error code: 1101" HTTP 500 while the container is not ready), then `npx wrangler r2 object get meeting-recordings/probe/intercept-test.bin --remote --file <scratch-dir>/everymeet-intercept-probe/got.bin && wc -c < <scratch-dir>/everymeet-intercept-probe/got.bin` - Expected: the curl body is `200 {"stored":12582912,"path":"/segments/0"}` and `wc -c` prints `12582912`.
       If the output starts with `ERR` (for example `ENOTFOUND`) or any status other than 200, STOP: report the output to the user before Track C; the transport in Decision 2 has to be re-decided (see Failure handling).
 - [ ] Step 5: Run the Rollback line.
   No commit.
@@ -823,21 +823,21 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
       });
 
       test("Meet links and codes are normalized, and anything else is refused", () => {
-        const ok = { url: "https://meet.google.com/jku-cpry-bcg", code: "jku-cpry-bcg" };
+        const ok = { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" };
         for (const input of [
-          "https://meet.google.com/jku-cpry-bcg",
-          " meet.google.com/jku-cpry-bcg?authuser=1 ",
-          "http://meet.google.com/JKU-CPRY-BCG/",
-          "jku-cpry-bcg",
+          "https://meet.google.com/abc-defg-hij",
+          " meet.google.com/abc-defg-hij?authuser=1 ",
+          "http://meet.google.com/ABC-DEFG-HIJ/",
+          "abc-defg-hij",
         ]) {
           assert.deepEqual(parseMeetUrl(input), ok, input);
         }
         for (const input of [
-          "https://evil.example.com/jku-cpry-bcg",
-          "https://meet.google.com.evil.example.com/jku-cpry-bcg",
+          "https://evil.example.com/abc-defg-hij",
+          "https://meet.google.com.evil.example.com/abc-defg-hij",
           "https://meet.google.com/lookup/abcdefghij",
           "https://meet.google.com/",
-          "jku-cpry",
+          "abc-defg",
         ]) {
           assert.equal(parseMeetUrl(input), undefined, input);
         }
@@ -887,8 +887,8 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
           endedAt: 60_000,
           heartbeatAt: 0,
           guildName: "Planthia",
-          voiceChannelName: "Google Meet jku-cpry-bcg",
-          meet: { url: "https://meet.google.com/jku-cpry-bcg", code: "jku-cpry-bcg" },
+          voiceChannelName: "Google Meet abc-defg-hij",
+          meet: { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" },
           participants: { meet: { displayName: "เสียงรวมจาก Google Meet", utterances: [], segments: [], uploaded: [] } },
         };
         const t = formatTranscript(m, [
@@ -983,10 +983,10 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
           id,
           guildId: "g1",
           guildName: "Planthia",
-          voiceChannelId: "jku-cpry-bcg",
-          voiceChannelName: "Google Meet jku-cpry-bcg",
+          voiceChannelId: "abc-defg-hij",
+          voiceChannelName: "Google Meet abc-defg-hij",
           commandChannelId: "cmd",
-          meet: { url: "https://meet.google.com/jku-cpry-bcg", code: "jku-cpry-bcg" },
+          meet: { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" },
           startedBy: { id: "alice", name: "Alice" },
           startedAt,
           endedAt: startedAt + 20_000,
@@ -1029,7 +1029,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
           { start: sec(9.8), end: sec(12.2) },
         ]);
         const post = readPost(posts[0]!.payload);
-        assert.match(post.embed.title, /สรุปการประชุม - Google Meet jku-cpry-bcg/);
+        assert.match(post.embed.title, /สรุปการประชุม - Google Meet abc-defg-hij/);
         assert.equal(post.embed.fields.find((f: any) => f.name === "ผู้พูด").value, "เสียงรวมจาก Google Meet");
       });
       ```
@@ -1563,7 +1563,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
 
       const MIN = 60_000;
       const NOW = Date.UTC(2026, 9, 12, 3, 0, 0);
-      const MEET = { url: "https://meet.google.com/jku-cpry-bcg", code: "jku-cpry-bcg" };
+      const MEET = { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" };
       let guildSeq = 0;
 
       function harness() {
@@ -1620,7 +1620,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
         assert.equal(activeSessions.get(h.guildId), s);
         const raw = r2.get(keys.manifest(s.id))!.toString();
         assert.deepEqual(JSON.parse(raw).meet, MEET);
-        assert.equal(JSON.parse(raw).voiceChannelName, "Google Meet jku-cpry-bcg");
+        assert.equal(JSON.parse(raw).voiceChannelName, "Google Meet abc-defg-hij");
         assert.ok(!raw.includes("fake-session-cookie"), "the bot account session never reaches R2");
       });
 
@@ -1630,7 +1630,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
         const rec = remote(s.id);
         rec.status = { state: "recording", captureStartedAt: NOW + 40_000, consentPosted: true, segments: [] };
         await advance(15_000);
-        assert.deepEqual(h.said, ["🔴 I am recording the Google Meet call jku-cpry-bcg"]);
+        assert.deepEqual(h.said, ["🔴 I am recording the Google Meet call abc-defg-hij"]);
         await advance(15_000);
         assert.equal(h.said.length, 1, "announced once");
 
@@ -1682,10 +1682,10 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
       test("a call the bot never got into is marked failed with a reason-specific message and is not processed", async () => {
         for (const [reason, expected] of [
           ["denied", /did not let the bot join/],
-          ["not_admitted", /Nobody let the bot into Google Meet \*\*jku-cpry-bcg\*\* within 5 minutes/],
+          ["not_admitted", /Nobody let the bot into Google Meet \*\*abc-defg-hij\*\* within 5 minutes/],
           ["auth_expired", /session has expired.*npm run meet:login/],
           ["stopped", /stopped before the bot got in/],
-          ["join_failed", /could not record Google Meet \*\*jku-cpry-bcg\*\* \(the Google Meet page offered no way to join\)/],
+          ["join_failed", /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet page offered no way to join\)/],
         ] as const) {
           const h = harness();
           const s = await h.start();
@@ -1742,7 +1742,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
         assert.ok(activeSessions.get(h.guildId), "still following");
         await advance(15_000);
         assert.equal(activeSessions.get(h.guildId), undefined);
-        assert.match(h.said.at(-1)!, /could not record Google Meet \*\*jku-cpry-bcg\*\* \(the Google Meet recorder stopped unexpectedly\)/);
+        assert.match(h.said.at(-1)!, /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet recorder stopped unexpectedly\)/);
       });
 
       test("after a bot restart a Meet recording is re-attached, not closed, and not announced again", async () => {
@@ -1887,7 +1887,7 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
       ```ts
       // ---- Google Meet ---------------------------------------------------------------
 
-      const MEET_LINK = "https://meet.google.com/jku-cpry-bcg";
+      const MEET_LINK = "https://meet.google.com/abc-defg-hij";
 
       test("/record-meet refuses anything that is not a Google Meet link", async () => {
         const s = makeServer();
@@ -1902,13 +1902,13 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
         const s = makeServer();
         const alice = s.person("alice", "Alice");
         const replies = await s.command("record-meet", alice, { url: MEET_LINK });
-        assert.match(replies.at(-1).content, /Joining Google Meet \*\*jku-cpry-bcg\*\*/);
+        assert.match(replies.at(-1).content, /Joining Google Meet \*\*abc-defg-hij\*\*/);
         assert.ok(s.session() instanceof MeetSession);
         s.join(alice);
         const [again] = await s.command("record", alice);
-        assert.match(again.content, /already recording in \*\*Google Meet jku-cpry-bcg\*\*/);
-        const [twice] = await s.command("record-meet", alice, { url: "jku-cpry-bcg" });
-        assert.match(twice.content, /already recording in \*\*Google Meet jku-cpry-bcg\*\*/);
+        assert.match(again.content, /already recording in \*\*Google Meet abc-defg-hij\*\*/);
+        const [twice] = await s.command("record-meet", alice, { url: "abc-defg-hij" });
+        assert.match(twice.content, /already recording in \*\*Google Meet abc-defg-hij\*\*/);
 
         const other = makeServer();
         const bob = other.person("bob", "Bob");
@@ -1927,10 +1927,10 @@ The -50 dBFS threshold comes from the spike's 15-minute Cloudflare recording (`s
         const rec = meetWorker.recordings.get(id)!;
         rec.status = { state: "recording", captureStartedAt: Date.now(), consentPosted: true, segments: [] };
         await advance(15_000);
-        assert.ok(s.sent.includes("🔴 I am recording the Google Meet call jku-cpry-bcg"));
+        assert.ok(s.sent.includes("🔴 I am recording the Google Meet call abc-defg-hij"));
 
         const [reply] = await s.command("end", dave);
-        assert.match(reply.content, /Recording in \*\*Google Meet jku-cpry-bcg\*\* stopped/);
+        assert.match(reply.content, /Recording in \*\*Google Meet abc-defg-hij\*\* stopped/);
         assert.equal(rec.stopped, true);
         rec.status = { ...rec.status, state: "ended", segments: [{ index: 0, samples: 60 * SAMPLE_RATE }], end: { reason: "stopped", leftCleanly: true } };
         await advance(15_000);
@@ -2283,7 +2283,7 @@ Durable Object input gates make `load` -> modify -> `save` atomic only while no 
       const MIN = 60_000;
       const T0 = 1_000_000;
       const job: RecordingJob = {
-        meetUrl: "https://meet.google.com/jku-cpry-bcg",
+        meetUrl: "https://meet.google.com/abc-defg-hij",
         authState: '{"cookies":[{"value":"secret-cookie"}]}',
         sampleRate: 24_000,
         segmentSamples: 7_200_000,
@@ -2596,7 +2596,7 @@ The callback routes carry no token on purpose: `interceptOutboundHttp` sends onl
 
       const TOKEN = "t".repeat(40);
       const JOB = {
-        meetUrl: "https://meet.google.com/jku-cpry-bcg",
+        meetUrl: "https://meet.google.com/abc-defg-hij",
         sampleRate: 24_000,
         segmentSamples: 7_200_000,
         admitTimeoutMs: 1,
@@ -3847,7 +3847,7 @@ Never print `meet/auth/meet-auth.json` or the token; pass them with `--rawfile` 
       curl -s -o /dev/null -w '%{http_code}\n' <WORKER_URL>/recordings/smoke-x
       curl -s -o /dev/null -w '%{http_code}\n' -H "authorization: Bearer $(cat auth/recorder-token)" <WORKER_URL>/recordings/smoke-x
       SMOKE_ID=smoke-$(date +%s)
-      jq -n --rawfile auth auth/meet-auth.json '{meetUrl:"https://meet.google.com/jku-cpry-bcg", authState:$auth, sampleRate:24000, segmentSamples:7200000, admitTimeoutMs:300000, aloneTimeoutMs:180000, maxDurationMs:600000}' \
+      jq -n --rawfile auth auth/meet-auth.json '{meetUrl:"https://meet.google.com/abc-defg-hij", authState:$auth, sampleRate:24000, segmentSamples:7200000, admitTimeoutMs:300000, aloneTimeoutMs:180000, maxDurationMs:600000}' \
         | curl -s -w '%{http_code}\n' -X POST -H "authorization: Bearer $(cat auth/recorder-token)" -H 'content-type: application/json' --data @- <WORKER_URL>/recordings/$SMOKE_ID
       # poll every 10 s until "state":"recording" (at most 3 minutes), wait 60 s more, then:
       curl -s -X POST -H "authorization: Bearer $(cat auth/recorder-token)" <WORKER_URL>/recordings/$SMOKE_ID/stop -w '%{http_code}\n'
@@ -3880,12 +3880,12 @@ Prerequisites, each checked before the scenarios:
 - [ ] Manual: start the bot with `npm run dev` (keep its log) and `cd meet && npx wrangler tail everymeet-meet-recorder --format json` in another terminal - Expected: the bot logs `logged in as` and `playback page listening on :8787`.
 
 Scenario A - natural end when everyone leaves:
-- [ ] 👤 Human: in the Discord test channel run `/record-meet url:https://meet.google.com/jku-cpry-bcg`, join that Meet from another device (admit the bot if Meet asks), check the Meet chat shows the Thai/English recording notice, read Thai text aloud for about 6 minutes while sharing a browser tab ("Present now") for the middle 4 of them, then leave the call - Expected: Discord shows "Joining Google Meet **jku-cpry-bcg**..." and within about 2 minutes "🔴 I am recording the Google Meet call jku-cpry-bcg"; about 3 minutes after leaving, a minutes post with PIN appears in `#meeting-of-minutes` - Proxy: `src/bot.test.ts` "/record-meet works from any channel..." and `src/meet/session.test.ts` "the channel is told once recording starts..." prove the same messages and hand-off without Discord.
-- [ ] Manual: from the tail and R2 for that recording id (from the bot log line `recording Google Meet jku-cpry-bcg as <id>`): heartbeats show `participants` 2 while the person is in (also during the screen share, so the share never triggers `alone`) and 1 after they leave; `ended` has `reason: "alone"`, `leftCleanly: true`, followed by `destroy`; a `segment` event for index 0 has `samples: 7200000` and several MB of `bytes` (a full 5-minute segment went through the callback); `npx wrangler r2 object get meeting-recordings/meetings/<id>/transcript.txt --remote --pipe | sed -n '9,14p'` shows lines like `[00:00:12] <Thai text>` without speaker names; `npx wrangler r2 object get meeting-recordings/meetings/<id>/manifest.json --remote --pipe | jq '{status, endReason, segments: .participants.meet.segments, outputs: .outputs.tracks}'` gives `"status": "done"`, `"endReason": "everyone left the Google Meet call for 3 minutes"`, segments `[0, 1]` (or more), `outputs: {}`.
+- [ ] 👤 Human: in the Discord test channel run `/record-meet url:https://meet.google.com/abc-defg-hij`, join that Meet from another device (admit the bot if Meet asks), check the Meet chat shows the Thai/English recording notice, read Thai text aloud for about 6 minutes while sharing a browser tab ("Present now") for the middle 4 of them, then leave the call - Expected: Discord shows "Joining Google Meet **abc-defg-hij**..." and within about 2 minutes "🔴 I am recording the Google Meet call abc-defg-hij"; about 3 minutes after leaving, a minutes post with PIN appears in `#meeting-of-minutes` - Proxy: `src/bot.test.ts` "/record-meet works from any channel..." and `src/meet/session.test.ts` "the channel is told once recording starts..." prove the same messages and hand-off without Discord.
+- [ ] Manual: from the tail and R2 for that recording id (from the bot log line `recording Google Meet abc-defg-hij as <id>`): heartbeats show `participants` 2 while the person is in (also during the screen share, so the share never triggers `alone`) and 1 after they leave; `ended` has `reason: "alone"`, `leftCleanly: true`, followed by `destroy`; a `segment` event for index 0 has `samples: 7200000` and several MB of `bytes` (a full 5-minute segment went through the callback); `npx wrangler r2 object get meeting-recordings/meetings/<id>/transcript.txt --remote --pipe | sed -n '9,14p'` shows lines like `[00:00:12] <Thai text>` without speaker names; `npx wrangler r2 object get meeting-recordings/meetings/<id>/manifest.json --remote --pipe | jq '{status, endReason, segments: .participants.meet.segments, outputs: .outputs.tracks}'` gives `"status": "done"`, `"endReason": "everyone left the Google Meet call for 3 minutes"`, segments `[0, 1]` (or more), `outputs: {}`.
 - [ ] 👤 Human: open the posted "ฟังเสียงบันทึกการประชุม" link, enter the PIN from the post, play the audio, and skim the Thai summary - Expected: the page shows the Meet title, the audio plays the call, there is no "เสียงแยกรายคน" section, and the summary reflects what was said without inventing speaker names - Proxy: `src/web/server.test.ts` (PIN flow) and the Task 6 run test (no per-speaker track, unnamed transcript, prompt tells the model speakers are unknown).
 
 Scenario B - `/end` from Discord:
-- [ ] 👤 Human: start `/record-meet` again on the test room, stay in the call for 2 minutes, then run `/end` in Discord - Expected: Discord replies "Recording in **Google Meet jku-cpry-bcg** stopped..."; the bot leaves the Meet call within about 20 s; a minutes post follows - Proxy: `src/bot.test.ts` "/end on a Meet recording tells the recorder to stop..." and `meet/worker/core.test.ts` "runner events move the state along, and /end reaches the runner in its next reply".
+- [ ] 👤 Human: start `/record-meet` again on the test room, stay in the call for 2 minutes, then run `/end` in Discord - Expected: Discord replies "Recording in **Google Meet abc-defg-hij** stopped..."; the bot leaves the Meet call within about 20 s; a minutes post follows - Proxy: `src/bot.test.ts` "/end on a Meet recording tells the recorder to stop..." and `meet/worker/core.test.ts` "runner events move the state along, and /end reaches the runner in its next reply".
 - [ ] Manual: tail shows `stop requested`, then `ended` with `reason: "stopped"`, `leftCleanly: true`, then `destroy`; the manifest `endReason` is `ended by <name> with /end`.
 
 Scenario C - the bot restarts mid-meeting:
