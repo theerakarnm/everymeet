@@ -6,6 +6,7 @@ import { mock } from "node:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Email } from "../email/send.js";
 import type { RecordingJob, RecordingStatus } from "../meet/protocol.js";
 
 export const dataDir = mkdtempSync(join(tmpdir(), "meeting-bot-test-"));
@@ -56,6 +57,24 @@ export function mockR2(opts: { failPuts?: () => boolean } = {}): void {
         writeFileSync(path, body);
       },
       presign: async (key: string) => `https://r2.example.com/${key}?X-Amz-Signature=test`,
+    },
+  });
+}
+
+/** Emails "sent" through the fake sender, oldest first. */
+export const sentEmails: Email[] = [];
+
+/**
+ * Replaces the Resend email sender. Call before importing code that sends email.
+ * `fail` makes sends to matching addresses throw like a refused send.
+ */
+export function mockEmail(opts: { fail?: (to: string) => boolean } = {}): void {
+  mock.module(new URL("../email/send.js", import.meta.url).href, {
+    namedExports: {
+      sendEmail: async (e: Email) => {
+        if (opts.fail?.(e.to)) throw new Error(`email to ${e.to} failed: HTTP 400 validation_error: Invalid \`to\` field.`);
+        sentEmails.push(e);
+      },
     },
   });
 }
