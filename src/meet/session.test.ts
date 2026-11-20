@@ -10,8 +10,7 @@ import { dataDir, FAKE_MEET_AUTH, fakeMeetRecorder, flush, mockR2, r2 } from "..
 
 mockR2();
 const worker = fakeMeetRecorder();
-const { MeetSession } = await import("./session.js");
-const { activeSessions } = await import("../recorder/active.js");
+const { MeetSession, MeetRefused, activeMeets } = await import("./session.js");
 const { keys } = await import("../storage/keys.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 
@@ -20,7 +19,7 @@ const NOW = Date.UTC(2026, 9, 12, 3, 0, 0);
 const MEET = { url: "https://meet.google.com/abc-defg-hij", code: "abc-defg-hij" };
 let guildSeq = 0;
 
-function harness() {
+function harness(meet = MEET) {
   const said: string[] = [];
   const finished: any[] = [];
   const guildId = `meet-guild${++guildSeq}`;
@@ -35,7 +34,7 @@ function harness() {
       guildName: "Planthia",
       commandChannelId: "cmd",
       startedBy: { id: "alice", name: "Alice" },
-      meet: MEET,
+      meet,
       onFinished,
     });
   return { said, finished, guildId, client, onFinished, start };
@@ -53,8 +52,8 @@ beforeEach(() => {
   mock.timers.enable({ apis: ["setInterval", "Date"], now: NOW });
 });
 afterEach(async () => {
-  for (const s of activeSessions.values()) await s.shutdown();
-  activeSessions.clear();
+  for (const s of activeMeets.values()) await s.shutdown();
+  activeMeets.clear();
   mock.timers.reset();
 });
 
@@ -71,7 +70,7 @@ test("starting sends the link, the session file and the timings to the recorder,
     maxDurationMs: 240 * MIN,
   });
   assert.equal(worker.authorizations.at(-1), `Bearer ${"m".repeat(40)}`);
-  assert.equal(activeSessions.get(h.guildId), s);
+  assert.equal(activeMeets.get(MEET.code), s);
   const raw = r2.get(keys.manifest(s.id))!.toString();
   assert.deepEqual(JSON.parse(raw).meet, MEET);
   assert.equal(JSON.parse(raw).voiceChannelName, "Google Meet abc-defg-hij");
@@ -106,7 +105,7 @@ test("the channel is told once recording starts, and when everyone left the meet
     segments: [0, 1],
     uploaded: [0, 1],
   });
-  assert.equal(activeSessions.get(h.guildId), undefined);
+  assert.equal(activeMeets.get(MEET.code), undefined);
   assert.equal(stored(s.id).status, "processing");
 });
 
@@ -126,7 +125,7 @@ test("/end asks the recorder to stop and keeps the Discord reason once the recor
   await advance(15_000);
   await s.end("ended by Dave with /end");
   assert.equal(rec.stopped, true);
-  assert.equal(activeSessions.get(h.guildId), s, "still active until the recorder confirms");
+  assert.equal(activeMeets.get(MEET.code), s, "still active until the recorder confirms");
   rec.status = { ...rec.status, state: "ended", segments: [{ index: 0, samples: 60 * SAMPLE_RATE }], end: { reason: "stopped", leftCleanly: true } };
   await advance(15_000);
   assert.equal(h.finished.at(-1).endReason, "ended by Dave with /end");
@@ -148,7 +147,7 @@ test("a call the bot never got into is marked failed with a reason-specific mess
     assert.match(h.said.at(-1)!, expected, reason);
     assert.equal(h.finished.length, 0, reason);
     assert.equal(stored(s.id).status, "failed", reason);
-    assert.equal(activeSessions.get(h.guildId), undefined, reason);
+    assert.equal(activeMeets.get(MEET.code), undefined, reason);
   }
 });
 
@@ -173,7 +172,7 @@ test("a network outage does not end the meeting: the bot keeps following the rec
   const s = await h.start();
   worker.down = true;
   await advance(30 * MIN);
-  assert.equal(activeSessions.get(h.guildId), s, "still following");
+  assert.equal(activeMeets.get(MEET.code), s, "still following");
   worker.down = false;
   remote(s.id).status = {
     state: "ended",
@@ -193,9 +192,9 @@ test("the bot gives up only after the recorder's own deadline has passed, and te
   worker.down = true;
   const giveUp = (15 + 240 + 60) * MIN; // admit timeout + MEET_MAX_DURATION_MIN + GIVE_UP_GRACE_MS
   await advance(giveUp - 15_000);
-  assert.ok(activeSessions.get(h.guildId), "still following");
+  assert.ok(activeMeets.get(MEET.code), "still following");
   await advance(15_000);
-  assert.equal(activeSessions.get(h.guildId), undefined);
+  assert.equal(activeMeets.get(MEET.code), undefined);
   assert.match(h.said.at(-1)!, /could not record Google Meet \*\*abc-defg-hij\*\* \(the Google Meet recorder stopped unexpectedly\)/);
 });
 
@@ -205,11 +204,11 @@ test("after a bot restart a Meet recording is re-attached, not closed, and not a
   remote(s.id).status = { state: "recording", captureStartedAt: NOW, consentPosted: true, segments: [] };
   await advance(15_000);
   await s.shutdown();
-  activeSessions.clear();
+  activeMeets.clear();
 
   MeetSession.resume(h.client, structuredClone(s.manifest), h.onFinished);
   await flush();
-  assert.ok(activeSessions.get(h.guildId), "re-registered");
+  assert.ok(activeMeets.get(MEET.code), "re-registered");
   remote(s.id).status = { ...remote(s.id).status, state: "ended", segments: [{ index: 0, samples: SEGMENT_SAMPLES }], end: { reason: "meeting_ended", leftCleanly: true } };
   await advance(15_000);
   assert.equal(h.said.length, 1, "announced only before the restart");
@@ -223,7 +222,7 @@ test("if the recorder cannot start, a stop is still sent, the error reaches the 
   await assert.rejects(h.start(), /HTTP 500/);
   await flush(20);
   assert.match(worker.requests.at(-1)!, /^POST \/recordings\/[\w-]+\/stop$/, "a start that timed out on our side must not leave a bot joining");
-  assert.equal(activeSessions.get(h.guildId), undefined);
+  assert.equal(activeMeets.get(MEET.code), undefined);
   worker.failStart = false;
   assert.ok(await h.start());
 });
@@ -239,4 +238,19 @@ test("a broken session file is reported without quoting it, before any recorder 
   } finally {
     writeFileSync(path, FAKE_MEET_AUTH);
   }
+});
+
+test("one recording per Meet call and at most two at once; refused starts reach no recorder, and a finished call frees its slot", async () => {
+  const first = await harness().start();
+  const other = { url: "https://meet.google.com/pqr-stuv-wxy", code: "pqr-stuv-wxy" };
+  const third = { url: "https://meet.google.com/xyz-abcd-efg", code: "xyz-abcd-efg" };
+  const before = worker.requests.length;
+  await assert.rejects(harness().start(), (err) => err instanceof MeetRefused && err.reason === "already_recording");
+  assert.equal(worker.requests.length, before, "nothing sent for a refused start");
+  await harness(other).start();
+  await assert.rejects(harness(third).start(), (err) => err instanceof MeetRefused && err.reason === "busy");
+  assert.equal(activeMeets.size, 2);
+  remote(first.id).status = { state: "ended", segments: [], end: { reason: "denied", leftCleanly: true } };
+  await advance(15_000);
+  assert.ok(await harness(third).start(), "the slot is free again");
 });

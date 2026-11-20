@@ -56,7 +56,7 @@ mock.module(new URL("./pipeline/run.js", import.meta.url).href, {
 });
 
 const { handleInteraction, handleVoiceStateUpdate } = await import("./interactions.js");
-const { activeSessions } = await import("./recorder/active.js");
+const { activeSessions } = await import("./recorder/session.js");
 const { keys } = await import("./storage/keys.js");
 const { SAMPLE_RATE } = await import("./config.js");
 

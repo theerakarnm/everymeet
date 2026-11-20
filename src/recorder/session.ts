@@ -24,7 +24,6 @@ import { newSessionId } from "../util/pin.js";
 import { logger } from "../util/log.js";
 import { TrackWriter, segmentPath } from "./track-writer.js";
 import { SegmentUploader } from "./segment-uploader.js";
-import { activeSessions, type ActiveRecording } from "./active.js";
 
 const log = logger("session");
 
@@ -33,9 +32,12 @@ export const CONTINUE_BUTTON_PREFIX = "meeting-continue:";
 const SEGMENT_GRACE_SAMPLES = SAMPLE_RATE * 15;
 const TICK_MS = 15_000;
 
+/** One active recording per guild (a bot can only be in one voice channel per guild). */
+export const activeSessions = new Map<string, MeetingSession>();
+
 type OnFinished = (manifest: Manifest) => void;
 
-export class MeetingSession implements ActiveRecording {
+export class MeetingSession {
   readonly manifest: Manifest;
   private connection!: VoiceConnection;
   private readonly writers = new Map<string, TrackWriter>();

@@ -7,8 +7,7 @@ import {
   type VoiceState,
 } from "discord.js";
 import { config } from "./config.js";
-import { activeSessions } from "./recorder/active.js";
-import { CONTINUE_BUTTON_PREFIX, MeetingSession } from "./recorder/session.js";
+import { activeSessions, CONTINUE_BUTTON_PREFIX, MeetingSession } from "./recorder/session.js";
 import { processMeeting } from "./pipeline/run.js";
 import { logger } from "./util/log.js";
 
@@ -88,7 +87,7 @@ export async function handleInteraction(client: Client, interaction: Interaction
     } else if (interaction.isButton() && interaction.customId.startsWith(CONTINUE_BUTTON_PREFIX)) {
       const id = interaction.customId.slice(CONTINUE_BUTTON_PREFIX.length);
       const session = [...activeSessions.values()].find((s) => s.id === id);
-      if (!(session instanceof MeetingSession)) {
+      if (!session) {
         await interaction.update({ content: "This recording has already ended.", components: [] });
         return;
       }
@@ -105,7 +104,7 @@ export async function handleInteraction(client: Client, interaction: Interaction
 /** Any join/leave/move in the recorded channel re-checks the empty-channel rule. */
 export function handleVoiceStateUpdate(oldState: VoiceState, newState: VoiceState): void {
   const session = activeSessions.get(newState.guild.id);
-  if (!(session instanceof MeetingSession)) return;
+  if (!session) return;
   const id = session.manifest.voiceChannelId;
   if (oldState.channelId === id || newState.channelId === id) session.checkEmpty();
 }

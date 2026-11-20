@@ -1,7 +1,6 @@
 import { readFileSync, rmSync } from "node:fs";
 import type { Client } from "discord.js";
 import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
-import { activeSessions, type ActiveRecording } from "../recorder/active.js";
 import { meetingDir, saveEverywhere, saveLocal, type Manifest } from "../storage/manifest.js";
 import { logger } from "../util/log.js";
 import { newSessionId } from "../util/pin.js";
@@ -19,11 +18,28 @@ export const MEET_SPEAKER_NAME = "เสียงรวมจาก Google Meet"
 
 type OnFinished = (manifest: Manifest) => void;
 
+/** The meet-recorder Worker runs at most this many containers (max_instances in meet/wrangler.jsonc). */
+export const MAX_MEET_RECORDINGS = 2;
+
+/** Google Meet recordings in progress, by Meet code: one per call, at most MAX_MEET_RECORDINGS at once. */
+export const activeMeets = new Map<string, MeetSession>();
+
+/** A start that the limits refuse; nothing was sent to the recorder. */
+export class MeetRefused extends Error {
+  constructor(readonly reason: "already_recording" | "busy") {
+    super(
+      reason === "busy"
+        ? `at most ${MAX_MEET_RECORDINGS} Google Meet recordings run at once`
+        : "this Google Meet call is already being recorded",
+    );
+  }
+}
+
 /**
  * A Google Meet recording. The meet-recorder Worker's container (meet/) does the recording;
  * this side owns the manifest, polls the recorder, talks to Discord, and hands the result to processing.
  */
-export class MeetSession implements ActiveRecording {
+export class MeetSession {
   private tick?: NodeJS.Timeout;
   private polling = false;
   private readonly giveUpAt: number;
@@ -47,6 +63,8 @@ export class MeetSession implements ActiveRecording {
     meet: { url: string; code: string };
     onFinished: OnFinished;
   }): Promise<MeetSession> {
+    if (activeMeets.has(o.meet.code)) throw new MeetRefused("already_recording");
+    if (activeMeets.size >= MAX_MEET_RECORDINGS) throw new MeetRefused("busy");
     const c = config();
     const now = Date.now();
     const manifest: Manifest = {
@@ -64,7 +82,7 @@ export class MeetSession implements ActiveRecording {
       participants: {},
     };
     const s = new MeetSession(o.client, manifest, o.onFinished);
-    activeSessions.set(o.guildId, s);
+    activeMeets.set(o.meet.code, s);
     try {
       // Saved before the recorder starts, so recoverUnfinished() re-attaches if this process dies right after.
       saveLocal(manifest);
@@ -80,7 +98,7 @@ export class MeetSession implements ActiveRecording {
     } catch (err) {
       // The request may have reached the Worker even though it failed here (a timeout): make sure no bot joins.
       recorder.stop(manifest.id).catch(() => {});
-      activeSessions.delete(o.guildId);
+      activeMeets.delete(o.meet.code);
       rmSync(meetingDir(manifest.id), { recursive: true, force: true });
       throw err;
     }
@@ -93,7 +111,7 @@ export class MeetSession implements ActiveRecording {
   /** Re-attach to a recording that kept running on Cloudflare while this process restarted. */
   static resume(client: Client, manifest: Manifest, onFinished: OnFinished): MeetSession {
     const s = new MeetSession(client, manifest, onFinished);
-    activeSessions.set(manifest.guildId, s);
+    activeMeets.set(manifest.meet!.code, s);
     s.tick = setInterval(() => void s.poll(), TICK_MS);
     void s.poll();
     log.info(`re-attached to Google Meet recording ${manifest.id}`);
@@ -181,7 +199,7 @@ export class MeetSession implements ActiveRecording {
 
   private async doFinish(status: RecordingStatus | undefined): Promise<void> {
     clearInterval(this.tick);
-    activeSessions.delete(this.manifest.guildId);
+    activeMeets.delete(this.code);
     const m = this.manifest;
     const end = status?.end;
     const segments = status?.segments ?? [];
