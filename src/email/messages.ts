@@ -1,5 +1,6 @@
 import { config, MEET_ADMIT_TIMEOUT_MS } from "../config.js";
 import type { EndReason, RecordingEnd } from "../meet/protocol.js";
+import type { RefusalReason } from "../meet/session.js";
 import { bangkokDateTime, durationTh } from "../util/time.js";
 
 /** One email's content; the caller adds the recipient. */
@@ -129,14 +130,24 @@ export function processingFailedMail(o: { id: string; title: string; startedAt: 
   ]);
 }
 
-export function calendarRefusedMail(o: { title: string; code: string; reason: "busy" | "start_failed" | "already_recording" }): Mail {
+export function calendarRefusedMail(o: { title: string; code: string; reason: RefusalReason | "start_failed" }): Mail {
   const head = `บอทไม่ได้เข้าห้อง Google Meet ${o.code} ของนัด "${o.title}"`;
   if (o.reason === "already_recording") {
     return mail(`ยังไม่ได้บันทึก Google Meet - ${o.title}`, [
       `${head} เพราะห้องนี้กำลังถูกบันทึกอยู่แล้ว บอทจะลองใหม่ทุกนาทีในช่วงเวลาเริ่มของนัดนี้ ถ้าห้องนี้กำลังบันทึกให้การประชุมอื่น เสียงช่วงนี้จะอยู่ในบันทึกของการประชุมนั้น`,
     ]);
   }
-  const why = o.reason === "busy" ? "ตอนนี้บันทึก Google Meet อยู่ 2 ห้องแล้ว ซึ่งเป็นจำนวนสูงสุด" : "เปิดเครื่องบันทึกไม่สำเร็จ";
+  const c = config();
+  const why = {
+    busy: "ตอนนี้บันทึก Google Meet อยู่ 2 ห้องแล้ว ซึ่งเป็นจำนวนสูงสุด",
+    start_failed: "เปิดเครื่องบันทึกไม่สำเร็จ",
+    user_busy: `คุณกำลังบันทึก Google Meet อยู่ ${c.MEET_MAX_ACTIVE_PER_USER} ห้อง ซึ่งเป็นจำนวนสูงสุดต่อคน บอทจะลองใหม่ทุกนาทีในช่วงเวลาเริ่มของนัดนี้ เมื่อการบันทึกก่อนหน้าจบ`,
+    daily_limit: `คุณเริ่มบันทึกครบ ${c.MEET_MAX_DAILY_PER_USER} ครั้งใน 24 ชั่วโมงแล้ว ซึ่งเป็นจำนวนสูงสุดต่อคน`,
+  }[o.reason];
+  // Starting by hand on the web page helps only when the limit was the recorder's, not the person's (user_busy is retried by the poller).
+  if (o.reason === "user_busy" || o.reason === "daily_limit") {
+    return mail(`ไม่ได้บันทึก Google Meet - ${o.title}`, [`${head} เพราะ${why}`]);
+  }
   return mail(`ไม่ได้บันทึก Google Meet - ${o.title}`, [
     `${head} เพราะ${why} เริ่มบันทึกเองได้ที่หน้าเว็บ`,
     { url: `${base()}/meet`, label: "เริ่มบันทึกเอง" },

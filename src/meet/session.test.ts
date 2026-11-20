@@ -12,6 +12,7 @@ mockR2();
 mockEmail();
 const worker = fakeMeetRecorder();
 const { MeetSession, MeetRefused, activeMeets } = await import("./session.js");
+const { users } = await import("../users/store.js");
 const { keys } = await import("../storage/keys.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 
@@ -265,4 +266,24 @@ test("one recording per Meet call and at most two at once; refused starts reach 
   remote(first.id).status = { state: "ended", segments: [], end: { reason: "denied", leftCleanly: true } };
   await advance(15_000);
   assert.ok(await harness(third, "dave@example.com").start(), "the slot is free again");
+});
+
+test("one person runs one recording at a time and starts at most 5 in 24 hours; refused starts reach no recorder", async () => {
+  const pat = "pat@example.com";
+  users().signIn(pat, NOW);
+  const other = { url: "https://meet.google.com/pqr-stuv-wxy", code: "pqr-stuv-wxy" };
+  const first = await harness(MEET, pat).start();
+  const before = worker.requests.length;
+  await assert.rejects(harness(other, pat).start(), (err) => err instanceof MeetRefused && err.reason === "user_busy");
+  assert.equal(worker.requests.length, before, "nothing sent for a refused start");
+  const end = async (id: string) => {
+    remote(id).status = { state: "ended", segments: [], end: { reason: "denied", leftCleanly: true } };
+    await advance(15_000);
+  };
+  await end(first.id);
+  for (let i = 2; i <= 5; i++) await end((await harness(MEET, pat).start()).id);
+  assert.equal(users().startsToday(pat, Date.now()), 5);
+  await assert.rejects(harness(MEET, pat).start(), (err) => err instanceof MeetRefused && err.reason === "daily_limit");
+  await advance(24 * 60 * MIN);
+  assert.ok(await harness(MEET, pat).start(), "allowed again a day after the first start");
 });

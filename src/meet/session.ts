@@ -3,6 +3,7 @@ import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../
 import { consentMissingMail, describeMeetEnd, notRecordedMail, type Mail } from "../email/messages.js";
 import { sendEmail } from "../email/send.js";
 import { meetingDir, saveEverywhere, saveLocal, type MeetInfo, type MeetManifest } from "../storage/manifest.js";
+import { users } from "../users/store.js";
 import { logger } from "../util/log.js";
 import { newSessionId } from "../util/pin.js";
 import { MEET_PARTICIPANT_ID, type RecordingState, type RecordingStatus } from "./protocol.js";
@@ -28,14 +29,20 @@ export const MAX_MEET_RECORDINGS = 2;
 /** Google Meet recordings in progress, by Meet code: one per call, at most MAX_MEET_RECORDINGS at once. */
 export const activeMeets = new Map<string, MeetSession>();
 
+/** Why a start was refused before anything reached the recorder. */
+export type RefusalReason = "already_recording" | "user_busy" | "daily_limit" | "busy";
+
+const REFUSALS: Record<RefusalReason, string> = {
+  already_recording: "this Google Meet call is already being recorded",
+  user_busy: "this person already runs as many Google Meet recordings as allowed at once",
+  daily_limit: "this person already started as many Google Meet recordings as allowed in 24 hours",
+  busy: `at most ${MAX_MEET_RECORDINGS} Google Meet recordings run at once`,
+};
+
 /** A start that the limits refuse; nothing was sent to the recorder. */
 export class MeetRefused extends Error {
-  constructor(readonly reason: "already_recording" | "busy") {
-    super(
-      reason === "busy"
-        ? `at most ${MAX_MEET_RECORDINGS} Google Meet recordings run at once`
-        : "this Google Meet call is already being recorded",
-    );
+  constructor(readonly reason: RefusalReason) {
+    super(REFUSALS[reason]);
   }
 }
 
@@ -61,10 +68,16 @@ export class MeetSession {
 
   /** Sends the bot into `meet`. The starter always gets the minutes too. Throws MeetRefused when a limit is reached. */
   static async start(meet: MeetInfo, onFinished: OnFinished): Promise<MeetSession> {
-    if (activeMeets.has(meet.code)) throw new MeetRefused("already_recording");
-    if (activeMeets.size >= MAX_MEET_RECORDINGS) throw new MeetRefused("busy");
     const c = config();
     const now = Date.now();
+    // Checked and registered in one synchronous block, so two starts at the same moment cannot both pass.
+    if (activeMeets.has(meet.code)) throw new MeetRefused("already_recording");
+    const running = [...activeMeets.values()].filter((s) => s.manifest.meet.startedBy === meet.startedBy).length;
+    if (running >= c.MEET_MAX_ACTIVE_PER_USER) throw new MeetRefused("user_busy");
+    if (users().startsToday(meet.startedBy, now) >= c.MEET_MAX_DAILY_PER_USER) throw new MeetRefused("daily_limit");
+    if (activeMeets.size >= MAX_MEET_RECORDINGS) throw new MeetRefused("busy");
+    // Counted before the recorder is asked: a start that then fails may still have started a container.
+    users().recordStart(meet.startedBy, now);
     const manifest: MeetManifest = {
       id: newSessionId(),
       meet: { ...meet, recipients: [...new Set([meet.startedBy, ...meet.recipients])] },
