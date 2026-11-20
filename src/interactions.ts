@@ -9,9 +9,6 @@ import {
 import { config } from "./config.js";
 import { activeSessions } from "./recorder/active.js";
 import { CONTINUE_BUTTON_PREFIX, MeetingSession } from "./recorder/session.js";
-import { MeetSession } from "./meet/session.js";
-import { meetRecorderConfigured } from "./meet/recorder-client.js";
-import { parseMeetUrl } from "./meet/meet-url.js";
 import { processMeeting } from "./pipeline/run.js";
 import { logger } from "./util/log.js";
 
@@ -66,49 +63,6 @@ async function handleRecord(client: Client, interaction: ChatInputCommandInterac
   }
 }
 
-async function handleRecordMeet(client: Client, interaction: ChatInputCommandInteraction<"cached">): Promise<void> {
-  if (!meetRecorderConfigured()) {
-    await interaction.reply({ content: "Google Meet recording is not set up on this bot.", flags: MessageFlags.Ephemeral });
-    return;
-  }
-  const meet = parseMeetUrl(interaction.options.getString("url", true));
-  if (!meet) {
-    await interaction.reply({
-      content: "That is not a Google Meet link. Use a link like https://meet.google.com/abc-defg-hij.",
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-  const existing = activeSessions.get(interaction.guildId);
-  if (existing) {
-    await interaction.reply({
-      content: `I am already recording in **${existing.manifest.voiceChannelName}**. Use /end there first.`,
-      flags: MessageFlags.Ephemeral,
-    });
-    return;
-  }
-
-  await interaction.deferReply();
-  try {
-    await MeetSession.start({
-      client,
-      guildId: interaction.guildId,
-      guildName: interaction.guild.name,
-      commandChannelId: interaction.channelId,
-      startedBy: { id: interaction.member.id, name: interaction.member.displayName },
-      meet,
-      onFinished: (m) => void processMeeting(client, m),
-    });
-  } catch (err) {
-    log.error("could not start a Google Meet recording", err);
-    await interaction.editReply("I couldn't start the Google Meet recorder. Please try again, or ask an admin to check the bot log.");
-    return;
-  }
-  await interaction.editReply(
-    `Joining Google Meet **${meet.code}**. If the host has to admit the bot, please let it in. I will post here when recording starts.`,
-  );
-}
-
 async function handleEnd(interaction: ChatInputCommandInteraction<"cached">): Promise<void> {
   const session = activeSessions.get(interaction.guildId);
   if (!session) {
@@ -130,7 +84,6 @@ export async function handleInteraction(client: Client, interaction: Interaction
         return;
       }
       if (interaction.commandName === "record") await handleRecord(client, interaction);
-      else if (interaction.commandName === "record-meet") await handleRecordMeet(client, interaction);
       else if (interaction.commandName === "end") await handleEnd(interaction);
     } else if (interaction.isButton() && interaction.customId.startsWith(CONTINUE_BUTTON_PREFIX)) {
       const id = interaction.customId.slice(CONTINUE_BUTTON_PREFIX.length);
