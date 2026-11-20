@@ -12,7 +12,8 @@ Every 5 minutes a finished segment is uploaded to R2 as FLAC, so a crash loses a
 `/end` (or an auto-end rule: 2 h "Continue recording?" prompt, or empty channel for 3 min) stops recording, skips silence, packs each speaker's speech into transcription requests of up to ~2 minutes, interleaves the transcripts by time, generates full and short Thai summaries, and posts the result with a 6-digit PIN.
 If the bot dies mid-meeting, `recoverUnfinished()` closes the meeting at the last heartbeat on restart and processes what it has.
 
-Google Meet calls are recorded without Discord: anyone who signs up starts one on the `/meet` web page (magic-link login, open signup), or invites the bot Google account to a calendar event, which the bot finds by reading its secret iCal feed every minute.
+Google Meet calls are recorded without Discord: anyone who signs up starts one on the `/meet` web page (magic-link login, open signup).
+A calendar trigger (invite the bot Google account to an event, found by reading its secret iCal feed) is planned but not built yet; its settings `CALENDAR_ICAL_URL` and `MEET_BOT_EMAIL` already exist.
 The recorder runs on Cloudflare Containers (`meet/`), uploads 5-minute FLAC segments to R2 through its Durable Object, and the bot polls it and feeds the same pipeline with one mixed pseudo-participant `meet`; the minutes and failure notices go out by email (Resend REST API, one email per recipient).
 Meet recording is optional and stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
 
@@ -52,7 +53,6 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 | `src/storage/keys.ts` | R2 key builders, import-free so the Worker can bundle them |
 | `src/meet/` | Google Meet side of the bot: MeetSession (poll, email notices, manifest, activeMeets and per-person limits), recorder client, VAD, link parsing, shared protocol.ts |
 | `src/web/` | Hono playback server, PIN flow, signed cookies, /meet magic-link login with open signup, recorder page, and admin page (meet-routes.ts), Thai HTML templates |
-| `src/calendar/` | Secret iCal feed reader (node-ical), due-occurrence rules, handled-occurrence store, poller |
 | `src/email/` | Resend client (send.ts, the only email I/O) and Thai email builders (messages.ts) |
 | `src/users/` | User store: `DATA_DIR/users.json`, atomic writes, the bot is its only writer (store.ts) |
 | `src/util/` | ffmpeg wrappers, concurrency limiter, logger, PIN/crypto helpers, time formatting, wav |
@@ -94,11 +94,11 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - The container publishes the web port on `127.0.0.1` only; Nginx terminates HTTPS, and `TRUST_PROXY=true` is set only behind that trusted proxy.
 - Meeting ids are 12 random bytes (base64url); validate them against `SESSION_ID_RE` before use.
 - Never commit `.env`, never log tokens or secrets.
-- The bot announces that it is recording in the command channel and voice channel chat (consent / PDPA); keep that behavior in any change.
+- Consent / PDPA: a Discord `/record` recording is announced in the command channel and the voice channel chat; keep that behavior in any change.
 - Recommend an R2 lifecycle rule deleting `meetings/*/segments/` and `meetings/*/debug/` after ~30 days; segments are only crash backups, and Meet failure screenshots in `debug/` can show people.
 - The bot-account session file (`MEET_AUTH_STATE_FILE`) is a full Google login credential: never commit it, never log it, never write it to R2, Durable Object storage, or the manifest.
-- A Meet recording is announced in the Meet chat (Thai/English notice); if the notice fails, the starter is emailed to tell the participants. Keep both.
-- Signup is open: anyone who confirms a login link gets an account in `DATA_DIR/users.json`, and only active accounts can use `/meet` or have a calendar event recorded as its organizer; the account is re-checked on every request.
+- A Google Meet recording needs only the notice in the Meet chat (Thai/English), not a Discord announcement; if the notice fails, the starter is emailed to tell the participants. Keep both.
+- Signup is open: anyone who confirms a login link gets an account in `DATA_DIR/users.json`, and only active accounts can use `/meet`; the account is re-checked on every request.
 - Open signup means anyone can make the bot join a Meet call at about $0.08 per recording hour: keep `MAX_MEET_RECORDINGS` (2), the per-person limits (`MEET_MAX_ACTIVE_PER_USER`, `MEET_MAX_DAILY_PER_USER`), the signup and login-email limits, and the admin page's disable button.
 - Login links are 32 random bytes, single use, 15 minutes, kept in memory; `/meet/login` answers the same for new, existing, and disabled addresses (no user enumeration) and is rate limited per IP and per email, and links to new addresses are capped per day in total (existing accounts are never capped).
 - `SEED_ADMIN_EMAIL` and every other real address live only in `.env`; the repo is public, so code, tests, and docs use placeholders.
@@ -114,21 +114,20 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - Debug registration with `npx tsx diag-commands.mts`.
 - The Meet recorder (`meet/`) deploys separately to Cloudflare from podman; see `## Google Meet recording` in README.md.
 - The bot Google account session is mounted read-only from `./secrets` to `/run/secrets/meet` (`MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json`).
-- After this change, run the register command once so Discord drops the removed `/record-meet` command.
+- After deploying the build without `/record-meet`, run the register command once so Discord drops that removed command.
 
 ## Gotchas
 
 - Discord does not officially document receiving audio; `@discordjs/voice` supports it, but a Discord change could break it, so pin dependency versions and test voice receive after upgrades.
-- One recording per server at a time is enforced; do not remove that invariant without redesigning storage keys.
 - The OpenRouter price unit for MAI-Transcribe 2 is unclear; if billing turns out to be per request, raise `maxChunk` in `pipeline/plan.ts` to reduce the call count.
 - Local temp audio can reach ~170 MB per speaker-hour; `CLEANUP_LOCAL=true` removes it after posting.
 - Every fallback model pair (transcribe, summary) should keep working; do not remove the fallback path.
 - Meet DOM texts and selectors live only in `meet/bot/meet-page.ts`; when joins or end detection break after a Meet UI change, start from `failure.png` in R2 and the `wrangler tail` events.
 - `src/meet/protocol.ts` and `src/storage/keys.ts` are bundled into the Worker and the container: keep them free of imports.
 - A stop on the web page returns at once, but the minutes arrive only after the recorder reports the end (up to about a minute later).
-- One Discord recording per server and one Google Meet recording per Meet call, at most 2 Meet recordings in total (`MAX_MEET_RECORDINGS`, the Worker's `max_instances`); a start right after a recording ended can still fail for up to 30 s while the old container shuts down.
-- Google's secret iCal feed is not instant; an invitation made shortly before the meeting may be missed (start it on the web page instead).
-- A recording covers whatever happens in its Meet room until it ends; a calendar event whose room, or whose organizer's own recording slot, is still taken is retried for 15 minutes and its organizer is told once.
+- Discord: one recording per server at a time; do not remove that invariant without redesigning storage keys.
+- Google Meet: one recording per Meet code, at most 2 Meet recordings in total (`MAX_MEET_RECORDINGS`, the Worker's `max_instances`), plus the per-person limits below; a start right after a recording ended can still fail for up to 30 s while the old container shuts down.
+- A recording covers whatever happens in its Meet room until it ends.
 - `users.json` is written only by the running bot (`src/users/store.ts`); do not add a second writer (a CLI, a cron job) without moving the store to something with real locking.
 - Each person may run `MEET_MAX_ACTIVE_PER_USER` recordings and start `MEET_MAX_DAILY_PER_USER` per 24 hours; the 24-hour start times live in `users.json`, so a restart does not reset them.
 
