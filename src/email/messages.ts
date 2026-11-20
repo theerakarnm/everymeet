@@ -61,7 +61,7 @@ export function describeMeetEnd(reason: EndReason | undefined): string {
 
 export function loginMail(link: string): Mail {
   return mail("ลิงก์เข้าสู่ระบบบันทึก Google Meet", [
-    "กดปุ่มด้านล่างเพื่อเข้าสู่ระบบหน้าบันทึก Google Meet ลิงก์นี้ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว",
+    "กดปุ่มด้านล่างเพื่อเข้าสู่ระบบหน้าบันทึก Google Meet ถ้ายังไม่มีบัญชี การเข้าสู่ระบบครั้งแรกจะสร้างบัญชีให้ ลิงก์นี้ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว",
     { url: link, label: "เข้าสู่ระบบ" },
     "ถ้าคุณไม่ได้ขอลิงก์นี้ ไม่ต้องทำอะไร",
   ]);
