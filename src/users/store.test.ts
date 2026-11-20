@@ -81,3 +81,16 @@ test("the file is readable by the bot user only", () => {
   new UserStore(path).signIn("eve@example.com", 1_000);
   assert.equal(statSync(path).mode & 0o777, 0o600);
 });
+
+test("seeding demotes every other admin, so a changed SEED_ADMIN_EMAIL takes the admin flag from the old address", () => {
+  const path = tempFile();
+  const store = new UserStore(path);
+  store.seedAdmin("old@example.com", 1_000);
+  store.signIn("hal@example.com", 2_000);
+  store.seedAdmin("new@example.com", 3_000);
+  assert.equal(store.get("new@example.com")?.isAdmin, true);
+  assert.equal(store.get("old@example.com")?.isAdmin, false);
+  assert.equal(store.get("old@example.com")?.status, "active", "the old admin keeps an ordinary account");
+  assert.equal(new UserStore(path).get("old@example.com")?.isAdmin, false, "saved");
+  assert.equal(store.get("hal@example.com")?.isAdmin, false);
+});

@@ -104,7 +104,7 @@ Two ways to start a recording:
   New invitations show up only after Google refreshes the calendar feed, which can take a few minutes, so invite the bot well before the meeting.
 
 Accounts live in `DATA_DIR/users.json` (status active or disabled, admin flag, created and last-login times).
-`SEED_ADMIN_EMAIL` becomes an active admin at every boot; admins open `<PUBLIC_BASE_URL>/meet/admin` to disable or enable accounts.
+`SEED_ADMIN_EMAIL` becomes an active admin at every boot and is the only admin (after a change of that address the old one loses the admin flag at the next boot); admins open `<PUBLIC_BASE_URL>/meet/admin` to disable or enable accounts.
 Because signup is open, each person may run `MEET_MAX_ACTIVE_PER_USER` recordings at once (default 1) and start `MEET_MAX_DAILY_PER_USER` in 24 hours (default 5), web and calendar together; link requests and new accounts are rate limited.
 Login links to addresses without an account are capped at 50 per 24 hours in total, to protect the Resend quota the minutes need.
 This is a deliberate trade-off: someone who requests links for many made-up addresses can use up that cap and block new signups for 24 hours, while existing accounts can still sign in.

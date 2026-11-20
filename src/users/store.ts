@@ -87,8 +87,12 @@ export class UserStore {
     return u;
   }
 
-  /** SEED_ADMIN_EMAIL at boot: creates that user as an active admin, or makes the existing one an active admin again. */
+  /**
+   * SEED_ADMIN_EMAIL at boot: creates that user as an active admin, or makes the existing one an active admin again.
+   * It is the only admin: everyone else loses the flag, so changing SEED_ADMIN_EMAIL demotes the old address.
+   */
   seedAdmin(email: string, now: number): void {
+    for (const other of this.users.values()) other.isAdmin = false;
     const u = this.get(email) ?? { email: key(email), status: "active", isAdmin: true, createdAt: now, recentStarts: [] };
     u.status = "active";
     u.isAdmin = true;
