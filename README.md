@@ -176,7 +176,7 @@ A new deploy needs about a minute before containers start ("no container instanc
   ```
   Nginx error log lines can still show the query when the upstream fails; they are rare and the link works only once.
 - `DATA_DIR/users.json` holds every account; back it up with the volume, and edit it by hand only while the bot is stopped (the bot keeps it in memory and rewrites it on every change).
-  A damaged file stops the bot at boot with `users.json is not valid JSON`.
+  A damaged file stops the bot at boot with `users.json is not valid JSON` or `users.json is not a valid users file (<field>)`.
 - Resend allows 10 API requests per second per team and has a monthly quota (and a daily one on the free plan); a log line `email to ... failed: HTTP 429 daily_quota_exceeded` (or `monthly_quota_exceeded`, `rate_limit_exceeded`) says why mails stopped, and Resend > Logs shows every send.
 
 ## Things to know

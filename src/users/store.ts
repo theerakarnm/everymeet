@@ -1,5 +1,6 @@
 import { closeSync, existsSync, fchmodSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, writeSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { z } from "zod";
 import { config } from "../config.js";
 
 export type UserStatus = "active" | "disabled";
@@ -16,6 +17,16 @@ export interface User {
   recentStarts: number[];
 }
 
+const userSchema: z.ZodType<User> = z.object({
+  email: z.string(),
+  status: z.enum(["active", "disabled"]),
+  isAdmin: z.boolean(),
+  createdAt: z.number(),
+  lastLoginAt: z.number().optional(),
+  recentStarts: z.array(z.number()),
+});
+const fileSchema = z.object({ users: z.array(userSchema) });
+
 const DAY_MS = 24 * 60 * 60_000;
 const key = (email: string) => email.trim().toLowerCase();
 
@@ -29,15 +40,19 @@ export class UserStore {
   constructor(private readonly path: string) {
     if (!existsSync(path)) return;
     // Starting with no users over a damaged file would silently drop every account and the admin flag.
-    const damaged = new Error(`${path} is not valid JSON: restore it from a backup before starting the bot`);
-    let saved: { users?: unknown };
+    // The errors never quote the file: it holds every address.
+    let saved: unknown;
     try {
-      saved = JSON.parse(readFileSync(path, "utf8")) as { users?: unknown };
+      saved = JSON.parse(readFileSync(path, "utf8"));
     } catch {
-      throw damaged;
+      throw new Error(`${path} is not valid JSON: restore it from a backup before starting the bot`);
     }
-    if (!Array.isArray(saved?.users)) throw damaged;
-    for (const u of saved.users as User[]) this.users.set(u.email, u);
+    const parsed = fileSchema.safeParse(saved);
+    if (!parsed.success) {
+      const where = [...new Set(parsed.error.issues.map((i) => i.path.join(".") || "(top level)"))].join(", ");
+      throw new Error(`${path} is not a valid users file (${where}): restore it from a backup before starting the bot`);
+    }
+    for (const u of parsed.data.users) this.users.set(u.email, u);
   }
 
   get(email: string): User | undefined {

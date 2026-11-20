@@ -58,8 +58,22 @@ test("starts are counted over a rolling 24 hours and kept across restarts; a dam
   writeFileSync(path, '{"users":[{"email":"secret@example.com"');
   assert.throws(() => new UserStore(path), (err: Error) => /not valid JSON/.test(err.message) && !err.message.includes("secret@"));
   assert.match(readFileSync(path, "utf8"), /secret@/, "the damaged file is left as it was");
+});
+
+test("a users file of the wrong shape stops the store with the place of the problem, without quoting values", () => {
+  const path = tempFile();
   writeFileSync(path, "{}");
-  assert.throws(() => new UserStore(path), /not valid JSON/, "valid JSON of the wrong shape is refused the same way");
+  assert.throws(() => new UserStore(path), /not a valid users file \(users\)/);
+  const good = { email: "fay@example.com", status: "active", isAdmin: false, createdAt: 1, recentStarts: [] };
+  writeFileSync(path, JSON.stringify({ users: [good, { ...good, email: "gil@example.com", status: "owner" }] }));
+  assert.throws(
+    () => new UserStore(path),
+    (err: Error) => /not a valid users file \(users\.1\.status\).*restore it from a backup/.test(err.message) && !err.message.includes("owner"),
+  );
+  writeFileSync(path, JSON.stringify({ users: [{ ...good, recentStarts: "x" }] }));
+  assert.throws(() => new UserStore(path), /users\.0\.recentStarts/);
+  writeFileSync(path, JSON.stringify({ users: [{ ...good, lastLoginAt: 5 }] }));
+  assert.equal(new UserStore(path).get("fay@example.com")?.lastLoginAt, 5);
 });
 
 test("the file is readable by the bot user only", () => {
