@@ -134,6 +134,31 @@ test("stop asks the recorder to leave and keeps its reason once the recorder rep
   assert.equal(h.finished.at(-1).endedAt, NOW + 60_000);
 });
 
+test("a stop whose reply comes after the poll already saw the end still keeps its reason", async () => {
+  const h = harness();
+  const s = await h.start();
+  const rec = remote(s.id);
+  rec.status = { state: "recording", captureStartedAt: NOW, consentPosted: true, segments: [] };
+  await advance(15_000);
+  const realFetch = globalThis.fetch;
+  let reply!: () => void;
+  const held = new Promise<void>((resolve) => (reply = resolve));
+  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
+    if (init.method === "POST" && String(url).endsWith("/stop")) await held;
+    return realFetch(url, init);
+  }) as typeof fetch;
+  try {
+    const stopping = s.end("หยุดโดย dave@example.com จากหน้าเว็บ");
+    rec.status = { ...rec.status, state: "ended", segments: [{ index: 0, samples: 60 * SAMPLE_RATE }], end: { reason: "stopped", leftCleanly: true } };
+    await advance(15_000);
+    reply();
+    await stopping;
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  assert.equal(h.finished.at(-1).endReason, "หยุดโดย dave@example.com จากหน้าเว็บ");
+});
+
 test("a stop that cannot reach the recorder throws, and the recording goes on", async () => {
   const s = await harness().start();
   worker.down = true;

@@ -142,8 +142,15 @@ export class MeetSession {
    */
   async end(reason: string): Promise<void> {
     if (this.finishing) return;
-    await recorder.stop(this.id);
+    // Set before the await: the poll can see the end while the stop request is still on its way.
+    const before = this.stopReason;
     this.stopReason ??= reason;
+    try {
+      await recorder.stop(this.id);
+    } catch (err) {
+      this.stopReason = before;
+      throw err;
+    }
   }
 
   /** The recording goes on in the cloud; boot re-attaches to it. */
