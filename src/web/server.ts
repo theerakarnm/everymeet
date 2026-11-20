@@ -1,6 +1,5 @@
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
-import { getConnInfo } from "@hono/node-server/conninfo";
 import { getCookie, setCookie } from "hono/cookie";
 import { config, SAMPLE_RATE } from "../config.js";
 import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
@@ -10,6 +9,7 @@ import { SESSION_ID_RE, signAccess, verifyAccess, verifyPin } from "../util/pin.
 import { bangkokDateTime, durationTh } from "../util/time.js";
 import { totalSamples } from "../pipeline/assemble.js";
 import { logger } from "../util/log.js";
+import { clientIp } from "./client-ip.js";
 import { page } from "./templates.js";
 
 const log = logger("web");
@@ -58,14 +58,6 @@ setInterval(() => {
 }, 10 * 60 * 1000).unref();
 
 // ---- helpers ---------------------------------------------------------------
-
-function clientIp(c: Context): string {
-  if (config().TRUST_PROXY) {
-    const fwd = c.req.header("x-forwarded-for")?.split(",")[0]?.trim();
-    if (fwd) return fwd;
-  }
-  return getConnInfo(c).remote.address ?? "unknown";
-}
 
 const cookieName = (id: string) => `ma_${id}`;
 
