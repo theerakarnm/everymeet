@@ -56,6 +56,7 @@ const view = (s: MeetSession): MeetRecordingView => ({
 /** The Google Meet page: magic-link login (the first confirmed link creates the account), then start, follow, and stop recordings. */
 export function meetRoutes(deps: MeetRouteDeps): Hono {
   const app = new Hono();
+  const loginEmails = new RateLimit(config().MEET_LOGIN_MAIL_DAILY_CAP, DAY_MS);
   // Forms from other sites are refused. Browsers send Sec-Fetch-Site: same-origin for our own forms; the page's
   // Referrer-Policy no-referrer can make them send Origin: null, so both checks stay (either one passing is enough).
   app.use("*", csrf({ origin: base() }));
@@ -78,8 +79,10 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
     if (account?.status === "disabled") {
       log.warn(`login link not sent to ${email}: the account is disabled`);
     } else if (!account && !signupEmails.take("all")) {
-      // Only new addresses are capped, so existing accounts (the admin too) can always sign in.
+      // Checked before the cap on all login emails, so made-up addresses cannot use that one up.
       log.error(`login link not sent to ${email}: ${MAX_SIGNUP_EMAILS_PER_DAY} links to new addresses were sent in the last 24 hours`);
+    } else if (!loginEmails.take("all")) {
+      log.error(`login link not sent to ${email}: ${config().MEET_LOGIN_MAIL_DAILY_CAP} login emails were sent in the last 24 hours (MEET_LOGIN_MAIL_DAILY_CAP)`);
     } else {
       // Not awaited: an existing account must not answer slower than a new address.
       sendEmail({ to: email, ...loginMail(`${base()}/meet/auth?t=${createLoginLink(email)}`) }).then(

@@ -63,6 +63,8 @@ const schema = z.object({
   MEET_MAX_ACTIVE_PER_USER: z.coerce.number().int().min(1).default(1),
   /** How many Google Meet recordings one person may start in 24 hours (web and calendar together). */
   MEET_MAX_DAILY_PER_USER: z.coerce.number().int().min(1).default(5),
+  /** Login emails in 24 hours, to new and existing addresses together, so the Resend quota is left for the minutes. */
+  MEET_LOGIN_MAIL_DAILY_CAP: z.coerce.number().int().min(1).default(300),
   /** The bot Google account people invite; it never gets the minutes. Needed for calendar starts. */
   MEET_BOT_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
   /** The bot account's "Secret address in iCal format". A secret: never log it. Calendar starts are off when unset. */
