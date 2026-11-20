@@ -70,7 +70,7 @@ npm run dev
 | `/record` | anyone in a voice channel | joins and replies *"I am recording the voice in channel {name}"* |
 | `/end` | anyone | stops, processes, posts minutes |
 
-Google Meet calls are recorded from the web page or a calendar invitation, not from Discord (see below).
+Google Meet calls are recorded from the web page, not from Discord (see below); a calendar trigger is planned but not built yet.
 
 One recording per server at a time.
 
@@ -92,13 +92,13 @@ Meet recording is optional.
 It stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set, and it then also needs `RESEND_API_KEY` and `EMAIL_FROM`.
 It does not use Discord at all.
 
-Two ways to start a recording:
+Two ways to start a recording (the calendar trigger is not built yet; this describes its planned behavior):
 
 - **Web page:** open `<PUBLIC_BASE_URL>/meet`, enter your email, and open the single-use login link the bot emails (valid 15 minutes).
   Anyone can sign up this way: the first confirmed link creates the account.
   Paste the Meet link, add extra recipient emails if you like, and press เริ่มบันทึก.
   The page lists your recordings with their state and a stop button.
-- **Calendar invitation:** invite the bot Google account (`MEET_BOT_EMAIL`) to a Google Calendar event that has a Meet link.
+- **Calendar invitation (not built yet):** invite the bot Google account (`MEET_BOT_EMAIL`) to a Google Calendar event that has a Meet link.
   The bot reads its calendar every minute and joins from one minute before the start until 15 minutes after it, but only when the event organizer has an active account (signed up on `/meet`; addresses are compared without case).
   Every occurrence of a recurring event is started at most once; deleted, cancelled, and moved occurrences are followed.
   New invitations show up only after Google refreshes the calendar feed, which can take a few minutes, so invite the bot well before the meeting.
@@ -132,12 +132,13 @@ Never commit it and never log it.
 4. `npx wrangler secret put RECORDER_TOKEN -c wrangler.deploy.jsonc` with the output of `openssl rand -base64 48`.
 5. On the VPS set `MEET_RECORDER_URL`, `MEET_RECORDER_TOKEN` (same value), and `MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json` in `.env`.
    Copy the session to `./secrets/meet-auth.json`, then run `chown 1000:1000` and `chmod 600` on it.
-   Also set `SEED_ADMIN_EMAIL` (your own address), `MEET_BOT_EMAIL`, `RESEND_API_KEY`, `EMAIL_FROM`, optionally the per-person limits, and optionally `CALENDAR_ICAL_URL` (see .env.example).
+   Also set `SEED_ADMIN_EMAIL` (your own address), `RESEND_API_KEY`, `EMAIL_FROM`, and optionally the per-person limits and `MEET_LOGIN_MAIL_DAILY_CAP` (see .env.example).
+   `MEET_BOT_EMAIL` and `CALENDAR_ICAL_URL` are used by the calendar trigger (not built yet).
    Run `docker compose up -d --build`.
 6. Run `npm run register` once after the deploy so Discord drops the old `/record-meet` command (in the container: `docker compose exec meeting-bot node dist/register-commands.js`).
 7. Email goes out through Resend from a domain you verified there (for example `mail.example.com`).
    In Resend > API Keys create a key with "Sending access" restricted to that domain for `RESEND_API_KEY`, and set `EMAIL_FROM` to an address on it (for example `minutes@mail.example.com`).
-8. Calendar (optional): in the bot Google account set Google Calendar > Settings > Event settings > "Add invitations to my calendar" to "From everyone".
+8. Calendar (used by the calendar trigger, not built yet): in the bot Google account set Google Calendar > Settings > Event settings > "Add invitations to my calendar" to "From everyone".
    Copy Settings for my calendars > Integrate calendar > "Secret address in iCal format" into `CALENDAR_ICAL_URL`.
    Treat that address like a password; if it leaks, reset it there and update `.env`.
 
@@ -167,7 +168,7 @@ A new deploy needs about a minute before containers start ("no container instanc
   No restart is needed, because the file is read on every start.
 - `failure.png` can show participants' names, faces, and chat.
   The R2 lifecycle rule should delete `meetings/*/debug/` together with `meetings/*/segments/` (about 30 days, PDPA).
-- The calendar trigger remembers which occurrences it already handled in `DATA_DIR/calendar-handled.json`; deleting that file can make an occurrence that is still within its 15-minute window start again.
+- The calendar trigger (not built yet) will remember which occurrences it already handled in `DATA_DIR/calendar-handled.json`; deleting that file could make an occurrence that is still within its 15-minute window start again.
 - Login links would appear in the Nginx access log as `/meet/auth?t=...` (they expire after 15 minutes and work once); keep them out of the log with a format without the query string:
   ```nginx
   # in the http block, e.g. /etc/nginx/conf.d/noquery.conf
