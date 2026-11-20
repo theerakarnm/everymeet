@@ -221,3 +221,27 @@ test("disabling an account signs it out at once, and a link made before that no 
   assert.match(await late.text(), /ถูกปิดการใช้งาน/);
   assert.equal(late.headers.get("set-cookie"), null);
 });
+
+test("an admin lists accounts and disables and enables them; the disabled person is signed out at once; an admin cannot change their own status", async () => {
+  users().seedAdmin("root@planthia.test", Date.now());
+  const root = await signIn("root@planthia.test");
+  const nina = await signIn("nina@planthia.test");
+  assert.match(await (await get("/meet", root)).text(), /href="\/meet\/admin"/);
+  assert.doesNotMatch(await (await get("/meet", nina)).text(), /\/meet\/admin/);
+  assert.match(await (await get("/meet/admin", root)).text(), /nina@planthia\.test/);
+  assert.equal((await post("/meet/admin/status", { email: "Nina@planthia.test", status: "disabled" }, { cookie: root })).status, 303);
+  assert.equal(users().get("nina@planthia.test")?.status, "disabled");
+  assert.match(await (await get("/meet", nina)).text(), /name="email"/, "nina's cookie no longer works");
+  assert.equal((await post("/meet/admin/status", { email: "nina@planthia.test", status: "active" }, { cookie: root })).status, 303);
+  assert.match(await (await get("/meet", nina)).text(), /name="url"/);
+  assert.equal((await post("/meet/admin/status", { email: "root@planthia.test", status: "disabled" }, { cookie: root })).status, 400);
+  assert.equal(users().get("root@planthia.test")?.status, "active");
+});
+
+test("the admin pages answer 404 to people who are not admins and to signed-out visitors", async () => {
+  const olga = await signIn("olga@planthia.test");
+  assert.equal((await get("/meet/admin", olga)).status, 404);
+  assert.equal((await get("/meet/admin")).status, 404);
+  assert.equal((await post("/meet/admin/status", { email: "olga@planthia.test", status: "disabled" }, { cookie: olga })).status, 404);
+  assert.equal(users().get("olga@planthia.test")?.status, "active");
+});

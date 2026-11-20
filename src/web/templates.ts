@@ -1,4 +1,6 @@
 import type { RecordingState } from "../meet/protocol.js";
+import type { User } from "../users/store.js";
+import { bangkokDateTime } from "../util/time.js";
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
@@ -26,6 +28,7 @@ li.rec{display:flex;justify-content:space-between;align-items:center;gap:12px;pa
 li.rec small{display:block;color:var(--muted);font-size:13px}
 li.rec form{flex:none}
 button.stop{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--err);border:1px solid var(--err)}
+button.enable{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--accent);border:1px solid var(--accent)}
 button{margin-top:16px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
 .err{color:var(--err);font-size:14px;margin:12px 0 0}
 audio{width:100%;margin:8px 0 20px}
@@ -149,7 +152,13 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
       `<h1>ลิงก์ใช้ไม่ได้</h1><p class="meta">ลิงก์หมดอายุหรือถูกใช้ไปแล้ว <a href="/meet">ขอลิงก์ใหม่</a></p>`,
     ),
 
-  meetRecorder: (o: { email: string; recordings: MeetRecordingView[]; error?: string; values?: { url: string; emails: string } }) => {
+  meetRecorder: (o: {
+    email: string;
+    recordings: MeetRecordingView[];
+    error?: string;
+    values?: { url: string; emails: string };
+    isAdmin?: boolean;
+  }) => {
     const items = o.recordings
       .map(
         (r) => `<li class="rec"><div>${esc(r.title)}<small>${esc(r.code)} · ${r.stopping ? "กำลังหยุด" : STATE[r.state]} · ${
@@ -175,7 +184,29 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <button type="submit">เริ่มบันทึก</button></form>
 <h2>การบันทึกของคุณ</h2>
 ${items ? `<ul>${items}</ul>` : `<p class="meta">ยังไม่มีการบันทึกที่กำลังทำงาน</p>`}
-<a class="refresh" href="/meet">รีเฟรชสถานะ</a>`,
+<a class="refresh" href="/meet">รีเฟรชสถานะ</a>${o.isAdmin ? ` · <a class="refresh" href="/meet/admin">จัดการผู้ใช้</a>` : ""}`,
+    );
+  },
+
+  meetAdmin: (o: { email: string; users: User[]; error?: string }) => {
+    const items = o.users
+      .map((u) => {
+        const next = u.status === "active" ? "disabled" : "active";
+        const button =
+          u.email === o.email
+            ? ""
+            : `<form method="post" action="/meet/admin/status"><input type="hidden" name="email" value="${esc(u.email)}"><input type="hidden" name="status" value="${next}"><button class="${next === "disabled" ? "stop" : "enable"}" type="submit">${
+                next === "disabled" ? "ปิดการใช้งาน" : "เปิดการใช้งาน"
+              }</button></form>`;
+        return `<li class="rec"><div>${esc(u.email)}<small>${u.isAdmin ? "ผู้ดูแล · " : ""}${
+          u.status === "active" ? "ใช้งานได้" : "ปิดการใช้งาน"
+        } · สมัครเมื่อ ${bangkokDateTime(u.createdAt)} · เข้าล่าสุด ${u.lastLoginAt ? bangkokDateTime(u.lastLoginAt) : "-"}</small></div>${button}</li>`;
+      })
+      .join("");
+    return meetCard(
+      "จัดการผู้ใช้",
+      `<h1>จัดการผู้ใช้</h1><p class="meta">${o.users.length} บัญชี · <a href="/meet">กลับหน้าบันทึก</a></p>
+${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}<ul>${items}</ul>`,
     );
   },
 };

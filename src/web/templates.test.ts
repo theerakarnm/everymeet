@@ -46,3 +46,18 @@ test("the PIN page keeps its big centered input and no longer mentions Discord",
   assert.match(html, /<input id="pin" class="pin"/);
   assert.doesNotMatch(html, /Discord/);
 });
+
+test("the admin page lists accounts with their state, escapes addresses, and has no button for the admin's own account", () => {
+  const html = page.meetAdmin({
+    email: "root@example.com",
+    users: [
+      { email: "root@example.com", status: "active", isAdmin: true, createdAt: Date.UTC(2026, 10, 20, 3), recentStarts: [] },
+      { email: "x<y@example.com", status: "disabled", isAdmin: false, createdAt: Date.UTC(2026, 10, 21, 3), lastLoginAt: Date.UTC(2026, 10, 21, 4), recentStarts: [] },
+    ],
+  });
+  assert.match(html, /2 บัญชี/);
+  assert.match(html, /root@example\.com<small>ผู้ดูแล · ใช้งานได้/);
+  assert.match(html, /x&lt;y@example\.com<small>ปิดการใช้งาน/);
+  assert.equal(html.match(/<form /g)?.length, 1, "only the other account has a button");
+  assert.match(html, /name="status" value="active"><button class="enable" type="submit">เปิดการใช้งาน/);
+});

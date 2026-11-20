@@ -60,7 +60,7 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
   // Referrer-Policy no-referrer can make them send Origin: null, so both checks stay (either one passing is enough).
   app.use("*", csrf({ origin: base() }));
   const recorderPage = (email: string, extra: { error?: string; values?: { url: string; emails: string } } = {}) =>
-    page.meetRecorder({ email, recordings: visibleTo(email).map(view), ...extra });
+    page.meetRecorder({ email, recordings: visibleTo(email).map(view), isAdmin: !!users().get(email)?.isAdmin, ...extra });
 
   app.get("/", (c) => {
     const email = user(c);
@@ -164,6 +164,30 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
       );
     }
     return c.redirect("/meet", 303);
+  });
+
+  /** The signed-in person when they are an active admin; everyone else gets 404, so the admin pages do not reveal themselves. */
+  const admin = (c: Context) => {
+    const email = user(c);
+    return email && users().get(email)?.isAdmin ? email : undefined;
+  };
+
+  app.get("/admin", (c) => {
+    const email = admin(c);
+    return email ? c.html(page.meetAdmin({ email, users: users().list() })) : c.html(page.notFound(), 404);
+  });
+
+  app.post("/admin/status", async (c) => {
+    const email = admin(c);
+    if (!email) return c.html(page.notFound(), 404);
+    const body = await c.req.parseBody();
+    const target = normalizeEmail(String(body.email ?? ""));
+    const status = body.status;
+    if (!target || target === email || (status !== "active" && status !== "disabled") || !users().setStatus(target, status)) {
+      return c.html(page.meetAdmin({ email, users: users().list(), error: "เปลี่ยนสถานะบัญชีนี้ไม่ได้" }), 400);
+    }
+    log.info(`${email} set the account ${target} to ${status}`);
+    return c.redirect("/meet/admin", 303);
   });
 
   return app;
