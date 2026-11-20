@@ -26,7 +26,7 @@ function storeMeeting(status: "processing" | "done", pin = generatePin()) {
   return { id, pin, manifest };
 }
 
-const app = createApp();
+const app = createApp({ startMeet: async () => { throw new Error("not used by the PIN tests"); } });
 let ipCounter = 0;
 const newIp = () => `10.0.0.${++ipCounter}`;
 

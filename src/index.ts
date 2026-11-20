@@ -1,8 +1,8 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { config } from "./config.js";
 import { activeSessions } from "./recorder/session.js";
-import { activeMeets } from "./meet/session.js";
-import { recoverUnfinished } from "./pipeline/run.js";
+import { activeMeets, MeetSession, type StartMeet } from "./meet/session.js";
+import { processMeeting, recoverUnfinished } from "./pipeline/run.js";
 import { handleInteraction, handleVoiceStateUpdate } from "./interactions.js";
 import { startWebServer } from "./web/server.js";
 import { users } from "./users/store.js";
@@ -17,6 +17,9 @@ if (c.SEED_ADMIN_EMAIL) people.seedAdmin(c.SEED_ADMIN_EMAIL, Date.now());
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
 });
+
+/** Both Google Meet triggers (the web page and the calendar) start recordings through this. */
+const startMeet: StartMeet = (meet) => MeetSession.start(meet, (m) => void processMeeting(client, m));
 
 client.on(Events.InteractionCreate, (interaction) => handleInteraction(client, interaction));
 client.on(Events.VoiceStateUpdate, handleVoiceStateUpdate);
@@ -41,5 +44,5 @@ process.on("unhandledRejection", (err) => log.error("unhandled rejection", err))
 
 // Google Meet recordings run on Cloudflare and need no Discord login: re-attach them before anything can start a new one.
 await recoverUnfinished(client, "meet");
-startWebServer();
+startWebServer({ startMeet });
 await client.login(c.DISCORD_TOKEN);

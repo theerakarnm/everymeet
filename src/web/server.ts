@@ -1,7 +1,9 @@
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { getCookie, setCookie } from "hono/cookie";
+import { HTTPException } from "hono/http-exception";
 import { config, SAMPLE_RATE } from "../config.js";
+import { meetRecorderConfigured } from "../meet/recorder-client.js";
 import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { presign } from "../storage/r2.js";
@@ -10,6 +12,7 @@ import { bangkokDateTime, durationTh } from "../util/time.js";
 import { totalSamples } from "../pipeline/assemble.js";
 import { logger } from "../util/log.js";
 import { clientIp } from "./client-ip.js";
+import { meetRoutes, type MeetRouteDeps } from "./meet-routes.js";
 import { page } from "./templates.js";
 
 const log = logger("web");
@@ -73,7 +76,7 @@ async function loadReady(id: string): Promise<Manifest | undefined> {
 
 // ---- app -------------------------------------------------------------------
 
-export function createApp(): Hono {
+export function createApp(deps: MeetRouteDeps): Hono {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
@@ -172,16 +175,20 @@ export function createApp(): Hono {
     return c.redirect(await presign(key, name, kind === "audio" && !download ? 4 * 3600 : 600), 302);
   });
 
+  // Google Meet recording page; its routes run after the security-header middleware above.
+  if (meetRecorderConfigured()) app.route("/meet", meetRoutes(deps));
+
   app.notFound((c) => c.html(page.notFound(), 404));
   app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
     log.error("request failed", err);
     return c.text("Internal error", 500);
   });
   return app;
 }
 
-export function startWebServer(): void {
+export function startWebServer(deps: MeetRouteDeps): void {
   const port = config().WEB_PORT;
-  serve({ fetch: createApp().fetch, port });
+  serve({ fetch: createApp(deps).fetch, port });
   log.info(`playback page listening on :${port}`);
 }
