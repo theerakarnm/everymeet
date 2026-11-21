@@ -12,10 +12,11 @@ Every 5 minutes a finished segment is uploaded to R2 as FLAC, so a crash loses a
 `/end` (or an auto-end rule: 2 h "Continue recording?" prompt, or empty channel for 3 min) stops recording, skips silence, packs each speaker's speech into transcription requests of up to ~2 minutes, interleaves the transcripts by time, generates full and short Thai summaries, and posts the result with a 6-digit PIN.
 If the bot dies mid-meeting, `recoverUnfinished()` closes the meeting at the last heartbeat on restart and processes what it has.
 
-Google Meet calls are recorded without Discord: anyone who signs up starts one on the `/meet` web page (magic-link login, open signup).
+Google Meet calls are recorded without Discord: anyone on `ALLOWED_EMAILS` starts one on the `/meet` web page (magic-link login, no accounts).
 A calendar trigger (invite the bot Google account to an event, found by reading its secret iCal feed) is planned but not built yet; its settings `CALENDAR_ICAL_URL` and `MEET_BOT_EMAIL` already exist.
 The recorder runs on Cloudflare Containers (`meet/`), uploads 5-minute FLAC segments to R2 through its Durable Object, and the bot polls it and feeds the same pipeline with one mixed pseudo-participant `meet`; the minutes and failure notices go out by email (Resend REST API, one email per recipient).
 Meet recording is optional and stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
+The repo is the open-source engine only; accounts, billing, quotas, and customer-facing pages belong to a separate hosted service that calls the engine's HTTP API.
 
 ## Hard constraint: Node 22, not Bun
 
@@ -51,10 +52,9 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 | `src/pipeline/` | Meeting processing: `plan.ts` (pure planning math), `assemble`, `transcribe`, `summarize`, `publish`, `run` (orchestrator), `openrouter` (API client) |
 | `src/storage/` | `manifest.json` state model and the R2 client |
 | `src/storage/keys.ts` | R2 key builders, import-free so the Worker can bundle them |
-| `src/meet/` | Google Meet side of the bot: MeetSession (poll, email notices, manifest, activeMeets and per-person limits), recorder client, VAD, link parsing, shared protocol.ts |
-| `src/web/` | Hono playback server, PIN flow, signed cookies, /meet magic-link login with open signup, recorder page, and admin page (meet-routes.ts), Thai HTML templates |
+| `src/meet/` | Google Meet side of the bot: MeetSession (poll, email notices, manifest, activeMeets), recorder client, VAD, link parsing, shared protocol.ts |
+| `src/web/` | Hono playback server, PIN flow, signed cookies, `/meet` magic-link login for `ALLOWED_EMAILS` and the recorder page (meet-routes.ts), Thai HTML templates |
 | `src/email/` | Resend client (send.ts, the only email I/O) and Thai email builders (messages.ts) |
-| `src/users/` | User store: `DATA_DIR/users.json`, atomic writes, the bot is its only writer (store.ts) |
 | `src/util/` | ffmpeg wrappers, concurrency limiter, logger, PIN/crypto helpers, time formatting, wav |
 | `src/test/setup.ts` | Shared test setup: fake env, in-memory R2, scripted OpenRouter fetch, fake email sender (mockEmail, sentEmails), fake meet recorder |
 | `diag-commands.mts` | Debug script to inspect slash command registration against the Discord API |
@@ -98,10 +98,9 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - Recommend an R2 lifecycle rule deleting `meetings/*/segments/` and `meetings/*/debug/` after ~30 days; segments are only crash backups, and Meet failure screenshots in `debug/` can show people.
 - The bot-account session file (`MEET_AUTH_STATE_FILE`) is a full Google login credential: never commit it, never log it, never write it to R2, Durable Object storage, or the manifest.
 - A Google Meet recording needs only the notice in the Meet chat (Thai/English), not a Discord announcement; if the notice fails, the starter is emailed to tell the participants. Keep both.
-- Signup is open: anyone who confirms a login link gets an account in `DATA_DIR/users.json`, and only active accounts can use `/meet`; the account is re-checked on every request.
-- Open signup means anyone can make the bot join a Meet call at about $0.08 per recording hour: keep `MAX_MEET_RECORDINGS` (2), the per-person limits (`MEET_MAX_ACTIVE_PER_USER`, `MEET_MAX_DAILY_PER_USER`), the signup and login-email limits, and the admin page's disable button.
-- Login links are 32 random bytes, single use, 15 minutes, kept in memory, and using one voids the other links of that address; `/meet/login` answers the same for new, existing, and disabled addresses (no user enumeration) and is rate limited per IP and per email, links to new addresses are capped at 50 per day in total, and all login emails at `MEET_LOGIN_MAIL_DAILY_CAP` (300) per day; over a cap the answer stays the same and no link is sent.
-- `SEED_ADMIN_EMAIL` and every other real address live only in `.env`; the repo is public, so code, tests, and docs use placeholders.
+- Only `ALLOWED_EMAILS` can use `/meet` and only allowed organizers trigger calendar recordings; keep `MAX_MEET_RECORDINGS` (2) and the one-per-Meet-code rule for every trigger.
+- Login links are 32 random bytes, single use, 15 minutes, kept in memory, and using one voids the other links of that address; `/meet/login` answers the same for allowed and other addresses (no user enumeration) and is rate limited per IP and per email, and all login emails at `MEET_LOGIN_MAIL_DAILY_CAP` (300) per day; over a cap the answer stays the same and no link is sent.
+- Every real address lives only in `.env`; the repo is public, so code, tests, and docs use placeholders.
 - The `/meet` cookie is HMAC-signed over `user:<email>` with `SESSION_SECRET`, `HttpOnly`, `SameSite=Lax`, 12 h; `hono/csrf` on `/meet/*` (logout included) refuses form posts from other sites. Keep both.
 - `CALENDAR_ICAL_URL` and `RESEND_API_KEY` are secrets: never log them or put them in error messages.
 - Resend keeps the sent emails, including the minutes PIN and the login links: limit who has access to the Resend team, and keep open and click tracking off for the sending domain (click tracking would rewrite the login and playback links through Resend).
@@ -126,10 +125,8 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - `src/meet/protocol.ts` and `src/storage/keys.ts` are bundled into the Worker and the container: keep them free of imports.
 - A stop on the web page returns at once, but the minutes arrive only after the recorder reports the end (up to about a minute later).
 - Discord: one recording per server at a time; do not remove that invariant without redesigning storage keys.
-- Google Meet: one recording per Meet code, at most 2 Meet recordings in total (`MAX_MEET_RECORDINGS`, the Worker's `max_instances`), plus the per-person limits below; a start right after a recording ended can still fail for up to 30 s while the old container shuts down.
+- Google Meet: one recording per Meet code, at most 2 Meet recordings in total (`MAX_MEET_RECORDINGS`, the Worker's `max_instances`); a start right after a recording ended can still fail for up to 30 s while the old container shuts down.
 - A recording covers whatever happens in its Meet room until it ends.
-- `users.json` is written only by the running bot (`src/users/store.ts`); do not add a second writer (a CLI, a cron job) without moving the store to something with real locking.
-- Each person may run `MEET_MAX_ACTIVE_PER_USER` recordings and start `MEET_MAX_DAILY_PER_USER` per 24 hours; the 24-hour start times live in `users.json`, so a restart does not reset them.
 
 ## Commits and pull requests
 

@@ -7,6 +7,7 @@
 > Run the `## Preflight` checks BEFORE task 1 and report anything down.
 > **Status (revised 2026-11-20):** Tasks 1-4 are done and committed on `feat/meet-recording` (bb746d1, 9706c77, dd61697, f166ecc), followed by the placeholder commit 29a9203.
 > The user then replaced the static `ALLOWED_EMAILS` allowlist with registered users and open signup (Decisions 4 and 18-22); Task 4b undoes the allowlist parts of Task 1, and Tasks 4c, 7b, and 11b are new.
+> **Rebased 2026-11-21 by docs/plans/2026-11-21-engine-service-split.md:** the user store, signup, admin page, and per-person limits are gone (Tasks 1-3 there); calendar organizers are trusted when `isAllowed(organizer, config().ALLOWED_EMAILS)`, and the only refusal reasons are `already_recording` and `busy`.
 > **Order:** Tasks 4b, 4c, 5, 6, 7, 7b, 8, 9, 10, 11, 11b, and 14 need nothing from the user or from Task 0 and can run now, in that order.
 > Task 0 is the user's probe (calendar feed and email domain) and runs alongside them.
 > Tasks 12-13 (calendar) start only after Task 0's gate says GO; Task 15 needs a Cloudflare login for the live image redeploy; `## End-to-end verification` comes last.
@@ -3492,7 +3493,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
         assert.equal(isDue({ ...o, end: new Date(start + 10 * 60_000) }, start + 11 * 60_000), false, "a 10-minute meeting is over");
       });
       ```
-- [ ] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8 && npm ls node-ical` - Expected: typecheck exit 0; `# pass 87`, `# fail 0` (83 + 4); `node-ical@0.27.6`.
+- [ ] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8 && npm ls node-ical` - Expected: typecheck exit 0; `# pass` is the root count before Task 12 plus 4, `# fail 0`; `node-ical@0.27.6`.
 - [ ] Step 6: Commit - `git add package.json package-lock.json src/calendar/feed.ts src/calendar/fixture.ics src/calendar/feed.test.ts && git commit -m "feat(calendar): read due Meet occurrences from an iCal feed"`
 
 ---
@@ -3506,7 +3507,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
 - Modify: `src/index.ts` (anchors: imports; `await recoverUnfinished(client, "meet");` from Task 8; `const startMeet: StartMeet` from Task 11)
 
 **Interfaces:**
-- Consumes: `occurrencesIn`, `isDue`, `recipientsOf`, `LEAD_MS`, `LATE_MS`, `Occurrence` (Task 12); `MeetRefused` (Task 6); `StartMeet` (Task 7); `startMeet` in `src/index.ts` (Task 11); `sendEmail` (Task 2); `calendarRefusedMail` (Task 4, widened in Task 7b); `RefusalReason` (Task 7b); `users()` (Task 4c).
+- Consumes: `occurrencesIn`, `isDue`, `recipientsOf`, `LEAD_MS`, `LATE_MS`, `Occurrence` (Task 12); `MeetRefused` (Task 6); `StartMeet` (Task 7); `startMeet` in `src/index.ts` (Task 11); `sendEmail` (Task 2); `calendarRefusedMail` (Task 4, widened in Task 7b); `RefusalReason` (Task 7b); `isAllowed` (Task 2 of docs/plans/2026-11-21-engine-service-split.md).
 - Produces: `startCalendarPoller(startMeet: StartMeet): void`; `pollCalendar(startMeet: StartMeet, now: number): Promise<void>`; `loadHandled(): Map<string, number>`; `saveHandled(handled: Map<string, number>, now: number): void`.
 
 **Steps:**
@@ -3540,7 +3541,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
       import { calendarRefusedMail } from "../email/messages.js";
       import { sendEmail } from "../email/send.js";
       import { MeetRefused, type RefusalReason, type StartMeet } from "../meet/session.js";
-      import { users } from "../users/store.js";
+      import { isAllowed } from "../util/email.js";
       import { logger } from "../util/log.js";
       import { isDue, LATE_MS, LEAD_MS, occurrencesIn, recipientsOf, type Occurrence } from "./feed.js";
       import { loadHandled, saveHandled } from "./handled.js";
@@ -3599,7 +3600,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
 
       /**
        * Acts on one due occurrence; false when it should be tried again on the next poll: its Meet room is still recorded
-       * for another meeting, or its organizer's own recording (MEET_MAX_ACTIVE_PER_USER) has not ended yet.
+       * for another meeting.
        */
       async function startOccurrence(o: Occurrence, startMeet: StartMeet, tellIfWaiting: boolean): Promise<boolean> {
         const c = config();
@@ -3607,9 +3608,9 @@ The reference code and the fixture were run while planning against `node-ical@0.
           log.info(`calendar event ${o.key} has no Google Meet link, skipped`);
           return true;
         }
-        // Only registered, active users may have the bot record their events (Decisions 6 and 22).
-        if (!o.organizer || !users().active(o.organizer)) {
-          log.warn(`calendar event ${o.key} skipped: organizer ${o.organizer ?? "unknown"} is not an active user`);
+        // Only organizers on ALLOWED_EMAILS have the bot record their events.
+        if (!o.organizer || !isAllowed(o.organizer, c.ALLOWED_EMAILS)) {
+          log.warn(`calendar event ${o.key} skipped: organizer ${o.organizer ?? "unknown"} is not on ALLOWED_EMAILS`);
           return true;
         }
         const organizer = o.organizer;
@@ -3627,13 +3628,13 @@ The reference code and the fixture were run while planning against `node-ical@0.
           log.info(`calendar event ${o.key} started recording ${o.meet.code}`);
         } catch (err) {
           // A calendar recording runs until its room empties, so back-to-back meetings often wait for the earlier one.
-          if (err instanceof MeetRefused && (err.reason === "already_recording" || err.reason === "user_busy")) {
+          if (err instanceof MeetRefused && err.reason === "already_recording") {
             log.info(`calendar event ${o.key}: ${err.message}, will retry`);
             if (tellIfWaiting) await tell(err.reason);
             return false;
           }
           log.error(`calendar event ${o.key} could not start a recording`, err);
-          // busy, daily_limit, or a recorder error: told once, not retried.
+          // busy or a recorder error: told once, not retried.
           await tell(err instanceof MeetRefused ? err.reason : "start_failed");
         }
         return true;
@@ -3654,7 +3655,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
       mockEmail();
       const { pollCalendar } = await import("./poller.js");
       const { MeetRefused } = await import("../meet/session.js");
-      const { users } = await import("../users/store.js");
+      const { config } = await import("../config.js");
 
       const ICS = readFileSync(new URL("./fixture.ics", import.meta.url), "utf8");
       const handledFile = join(dataDir, "calendar-handled.json");
@@ -3679,14 +3680,9 @@ The reference code and the fixture were run while planning against `node-ical@0.
         feedStatus = 200;
         sentEmails.length = 0;
         rmSync(handledFile, { force: true });
-        // The fixture's organizers alice and carol have accounts; mallory (the stranger) has none.
-        for (const email of ["alice@planthia.test", "carol@planthia.test"]) {
-          users().signIn(email, 0);
-          users().setStatus(email, "active");
-        }
       });
 
-      test("from one minute before the start, occurrences of active users with a Meet link start once; strangers and events without a link do not", async () => {
+      test("from one minute before the start, occurrences of allowed organizers with a Meet link start once; strangers and events without a link do not", async () => {
         await pollCalendar(startMeet, at("2026-11-23T02:58:59Z"));
         assert.deepEqual(started, [], "too early");
         await pollCalendar(startMeet, at("2026-11-23T02:59:00Z"));
@@ -3752,18 +3748,6 @@ The reference code and the fixture were run while planning against `node-ical@0.
         assert.match(sentEmails[0]!.text, /เปิดเครื่องบันทึกไม่สำเร็จ/);
       });
 
-      test("an organizer whose earlier recording still runs is told once, and the meeting starts once that recording ends", async () => {
-        refuse = new MeetRefused("user_busy");
-        await pollCalendar(startMeet, at("2026-11-23T02:59:00Z"));
-        await pollCalendar(startMeet, at("2026-11-23T03:00:00Z"));
-        assert.deepEqual(started, []);
-        assert.deepEqual(sentEmails.map((e) => e.to).sort(), ["alice@planthia.test", "carol@planthia.test"], "each organizer told once");
-        assert.match(sentEmails[0]!.text, /จะลองใหม่ทุกนาที/);
-        refuse = undefined;
-        await pollCalendar(startMeet, at("2026-11-23T03:05:00Z"));
-        assert.equal(started.length, 2, "started once the organizer's earlier recording ended");
-      });
-
       test("a poll that starts while the previous one is still busy does nothing", async () => {
         let release!: () => void;
         const gate = new Promise<void>((resolve) => (release = resolve));
@@ -3778,12 +3762,18 @@ The reference code and the fixture were run while planning against `node-ical@0.
         assert.deepEqual(started.map((s) => s.code).sort(), ["abc-defg-hij", "xyz-abcd-efg"], "each occurrence once");
       });
 
-      test("a disabled organizer's events are skipped quietly, and the occurrence is not started later", async () => {
-        users().setStatus("carol@planthia.test", "disabled");
-        await pollCalendar(startMeet, at("2026-11-23T02:59:00Z"));
-        assert.deepEqual(started.map((s) => s.startedBy), ["alice@planthia.test"]);
-        assert.equal(sentEmails.length, 0, "no email to a disabled organizer");
-        users().setStatus("carol@planthia.test", "active");
+      test("an organizer not on ALLOWED_EMAILS is skipped quietly, and the occurrence is not started later", async () => {
+        const allow = config().ALLOWED_EMAILS;
+        allow.domains.splice(allow.domains.indexOf("planthia.test"), 1);
+        allow.emails.push("alice@planthia.test"); // carol is no longer allowed, alice still is
+        try {
+          await pollCalendar(startMeet, at("2026-11-23T02:59:00Z"));
+          assert.deepEqual(started.map((s) => s.startedBy), ["alice@planthia.test"]);
+          assert.equal(sentEmails.length, 0, "no email to an organizer who is not allowed");
+        } finally {
+          allow.domains.push("planthia.test");
+          allow.emails.splice(allow.emails.indexOf("alice@planthia.test"), 1);
+        }
         await pollCalendar(startMeet, at("2026-11-23T03:00:00Z"));
         assert.equal(started.length, 1, "each occurrence is acted on once, also when it was skipped");
       });
@@ -3794,7 +3784,7 @@ The reference code and the fixture were run while planning against `node-ical@0.
         assert.deepEqual(started, []);
       });
       ```
-- [ ] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: typecheck exit 0; `# pass 96`, `# fail 0` (87 + 9).
+- [ ] Step 5: Verify - Run: `npm run typecheck && npm test 2>&1 | tail -8` - Expected: typecheck exit 0; the root count before Task 13 plus 8, `# fail 0`.
 - [ ] Step 6: Commit - `git add src/calendar/handled.ts src/calendar/poller.ts src/calendar/poller.test.ts src/index.ts && git commit -m "feat(calendar): start Meet recordings from calendar invitations"`
 
 ---
@@ -3937,7 +3927,7 @@ Run after Tasks 0-15.
 The bot runs locally with `npm run dev` against the deployed recorder Worker and real email; the Meet test room is `https://meet.google.com/abc-defg-hij` (free to use at any time).
 
 Prerequisites:
-- [ ] Run: `npm run typecheck && npm test 2>&1 | tail -8 && (cd meet && npm run typecheck && npm test 2>&1 | tail -8)` - Expected: both typechecks exit 0; root `# pass 96`, `# fail 0`; meet `# pass 20`, `# fail 0` (root `# pass 83` if Tasks 12-13 were skipped).
+- [ ] Run: `npm run typecheck && npm test 2>&1 | tail -8 && (cd meet && npm run typecheck && npm test 2>&1 | tail -8)` - Expected: both typechecks exit 0; root `# pass 118`, `# fail 0` (106 + 4 + 8); meet `# pass 20`, `# fail 0` (root `# pass 106` if Tasks 12-13 were skipped).
 - [ ] Manual: `for k in MEET_RECORDER_URL MEET_RECORDER_TOKEN MEET_AUTH_STATE_FILE SEED_ADMIN_EMAIL MEET_BOT_EMAIL CALENDAR_ICAL_URL RESEND_API_KEY EMAIL_FROM PUBLIC_BASE_URL; do grep -q "^$k=." .env && echo "$k set" || echo "$k MISSING"; done` - Expected: every key `set` (prints names only, never values).
 - [ ] 👤 Human: confirm that the Discord bot token in `.env` is not running anywhere else right now, that `PUBLIC_BASE_URL` in `.env` is an address your browser reaches for this run (for a local run `http://localhost:8787`), and that `SEED_ADMIN_EMAIL` in `.env` is your own address - Expected: a yes for each - Proxy: none needed (confirmations, not product checks).
 - [ ] Manual: `npm run build && npm run register` - Expected: `Registered 2 commands` (the old `/record-meet` is gone).
@@ -3960,10 +3950,7 @@ Scenario B - calendar invitation, a late organizer, and a bot restart (skip if T
 - [ ] 👤 Human: talk for about 2 more minutes, then everyone leaves - Expected: about 3 minutes later the bot leaves; the organizer and the second address get the minutes email titled "สรุปการประชุม - everymeet e2e calendar"; the bot account's inbox gets no minutes email - Proxy: `poller.test.ts` recipient assertions and `run.test.ts` email assertions.
 - [ ] Manual: the manifest of that id has `"trigger": "calendar"`, `startedBy` = the organizer, 2 recipients, and `endReason` = `ไม่มีผู้เข้าร่วมคนอื่นอยู่ในห้องแล้ว`.
 - [ ] 👤 Human: create a second event starting a few minutes after the feed delay, with no video conferencing and `https://meet.google.com/abc-defg-hij` in its description, inviting the bot; once the bot is in, sign in on `/meet` as the organizer - Expected: the bot joins the test room; the page lists it as "... · จากปฏิทิน" and pressing หยุดบันทึก stops it - Proxy: `feed.test.ts` "a link pasted in the description" and `meet-routes.test.ts` stop test.
-- [ ] 👤 Human: from a Google account whose address has NOT signed up on `/meet`, invite the bot to an event with Meet starting a few minutes after the feed delay - Expected: the bot never joins and that account gets no email - Proxy: `poller.test.ts` (stranger skipped, nobody emailed); Manual: the bot log shows `skipped: organizer <address> is not an active user`.
-
-Scenario C - limits:
-- [ ] 👤 Human: as the seeded admin start the test room on the page; in the private window, as the second account, start another Meet link (any new Meet); then, as the admin, try a third Meet link and the test room link again - Expected: "คุณกำลังบันทึกอยู่ 1 ห้อง ซึ่งเป็นจำนวนสูงสุดต่อคน..." and "ห้อง Google Meet นี้กำลังถูกบันทึกอยู่แล้ว"; if a third address is at hand, signing it up and starting a third link shows "ตอนนี้บันทึก Google Meet อยู่ 2 ห้องแล้ว..." - Proxy: `meet-routes.test.ts` "bad input, a recorder error, and the limits..." and `session.test.ts` limits tests (the "2 ห้องแล้ว" case is proven there when no third address is at hand).
+- [ ] 👤 Human: from a Google account whose address is not on `ALLOWED_EMAILS`, invite the bot to an event with Meet starting a few minutes after the feed delay - Expected: the bot never joins and that account gets no email - Proxy: `poller.test.ts` (stranger skipped, nobody emailed); Manual: the bot log shows `skipped: organizer <address> is not on ALLOWED_EMAILS`.
 
 Cleanup:
 - [ ] Manual: the tail shows a `destroy` line for every recording started above, and for each id `node --env-file=.env -e 'fetch(process.env.MEET_RECORDER_URL + "/recordings/" + process.argv[1], { headers: { Authorization: "Bearer " + process.env.MEET_RECORDER_TOKEN } }).then((r) => r.json()).then((s) => console.log(s.state))' <id>` prints `ended` - Expected: no recording left in another state (no container left running).

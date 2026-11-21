@@ -95,20 +95,17 @@ It does not use Discord at all.
 Two ways to start a recording (the calendar trigger is not built yet; this describes its planned behavior):
 
 - **Web page:** open `<PUBLIC_BASE_URL>/meet`, enter your email, and open the single-use login link the bot emails (valid 15 minutes).
-  Anyone can sign up this way: the first confirmed link creates the account.
+  This is magic-link login for the addresses and domains in `ALLOWED_EMAILS`; there are no accounts and no signup.
   Paste the Meet link, add extra recipient emails if you like, and press เริ่มบันทึก.
   The page lists your recordings with their state and a stop button.
 - **Calendar invitation (not built yet):** invite the bot Google account (`MEET_BOT_EMAIL`) to a Google Calendar event that has a Meet link.
-  The bot reads its calendar every minute and joins from one minute before the start until 15 minutes after it, but only when the event organizer has an active account (signed up on `/meet`; addresses are compared without case).
+  The bot reads its calendar every minute and joins from one minute before the start until 15 minutes after it, but only when the event organizer is on `ALLOWED_EMAILS` (addresses are compared without case).
   Every occurrence of a recurring event is started at most once; deleted, cancelled, and moved occurrences are followed.
   New invitations show up only after Google refreshes the calendar feed, which can take a few minutes, so invite the bot well before the meeting.
 
-Accounts live in `DATA_DIR/users.json` (status active or disabled, admin flag, created and last-login times).
-`SEED_ADMIN_EMAIL` becomes an active admin at every boot and is the only admin (after a change of that address the old one loses the admin flag at the next boot); admins open `<PUBLIC_BASE_URL>/meet/admin` to disable or enable accounts.
-Because signup is open, each person may run `MEET_MAX_ACTIVE_PER_USER` recordings at once (default 1) and start `MEET_MAX_DAILY_PER_USER` in 24 hours (default 5), web and calendar together; link requests and new accounts are rate limited.
-Login links to addresses without an account are capped at 50 per 24 hours in total, to protect the Resend quota the minutes need.
-This is a deliberate trade-off: someone who requests links for many made-up addresses can use up that cap and block new signups for 24 hours, while existing accounts can still sign in.
-All login emails together, to new and existing addresses, are capped at `MEET_LOGIN_MAIL_DAILY_CAP` per 24 hours (default 300); over either cap the page gives the usual answer but sends no link, and the log says why.
+Accounts, billing, and per-customer limits belong to the hosted service that uses the engine's API (`docs/api.md`), not to the engine.
+Link requests are rate limited per IP and per email address.
+All login emails together are capped at `MEET_LOGIN_MAIL_DAILY_CAP` per 24 hours (default 300), to protect the Resend quota the minutes need; over the cap the page gives the usual answer but sends no link, and the log says why.
 When the meeting ends, the bot emails the short summary, the playback link, and the PIN: for a calendar start to the organizer and every invitee who did not decline (never the bot account), for a web start to the starter and the extra addresses.
 Problems (the bot was not let in, the bot account session expired, the recorder failed) are emailed to the organizer or starter.
 At most 2 Meet recordings run at once and only one per Meet call; a further start is refused on the page or by email.
@@ -132,7 +129,7 @@ Never commit it and never log it.
 4. `npx wrangler secret put RECORDER_TOKEN -c wrangler.deploy.jsonc` with the output of `openssl rand -base64 48`.
 5. On the VPS set `MEET_RECORDER_URL`, `MEET_RECORDER_TOKEN` (same value), and `MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json` in `.env`.
    Copy the session to `./secrets/meet-auth.json`, then run `chown 1000:1000` and `chmod 600` on it.
-   Also set `SEED_ADMIN_EMAIL` (your own address), `RESEND_API_KEY`, `EMAIL_FROM`, and optionally the per-person limits and `MEET_LOGIN_MAIL_DAILY_CAP` (see .env.example).
+   Also set `ALLOWED_EMAILS` (the addresses and `@domains` that may sign in), `RESEND_API_KEY`, `EMAIL_FROM`, and optionally `MEET_LOGIN_MAIL_DAILY_CAP` (see .env.example).
    `MEET_BOT_EMAIL` and `CALENDAR_ICAL_URL` are used by the calendar trigger (not built yet).
    Run `docker compose up -d --build`.
 6. Run `npm run register` once after the deploy so Discord drops the old `/record-meet` command (in the container: `docker compose exec meeting-bot node dist/register-commands.js`).
@@ -177,8 +174,6 @@ A new deploy needs about a minute before containers start ("no container instanc
   access_log /var/log/nginx/access.log noquery;
   ```
   Nginx error log lines can still show the query when the upstream fails; they are rare and the link works only once.
-- `DATA_DIR/users.json` holds every account; back it up with the volume, and edit it by hand only while the bot is stopped (the bot keeps it in memory and rewrites it on every change).
-  A damaged file stops the bot at boot with `users.json is not valid JSON` or `users.json is not a valid users file (<field>)`.
 - Resend allows 10 API requests per second per team and has a monthly quota (and a daily one on the free plan); a log line `email to ... failed: HTTP 429 daily_quota_exceeded` (or `monthly_quota_exceeded`, `rate_limit_exceeded`) says why mails stopped, and Resend > Logs shows every send.
 
 ## Things to know
