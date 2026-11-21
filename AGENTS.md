@@ -34,6 +34,7 @@ npm start            # node dist/index.js (production)
 npm run typecheck    # tsc over src including tests, no emit
 npm test             # all suites with node:test, requires ffmpeg on PATH
 npm run register     # register slash commands (needs .env, reads dist/, so build first)
+npm run licenses     # check that every dependency license is AGPL-3.0 compatible (run when dependencies change)
 cd meet && npm ci && npm run typecheck && npm test   # the meet-recorder package (Worker + container)
 cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 ```
@@ -132,3 +133,4 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 
 - There is no established convention yet (the repo has a single init commit); use short imperative subjects, for example `fix recorder drop on late speaker join`.
 - Keep commits scoped to one subsystem (recorder, pipeline, web, storage) where practical.
+- Commits from outside contributors carry a DCO sign-off (`git commit -s`); maintainers check it before merging.
