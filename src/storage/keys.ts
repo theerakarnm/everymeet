@@ -12,4 +12,8 @@ export const keys = {
   summaryShort: (id: string) => `meetings/${id}/summary-short.md`,
   /** Screenshot the Google Meet recorder saves when it cannot join. */
   debug: (id: string, name: string) => `meetings/${id}/debug/${name}`,
+  /** Empty marker that lists an API recording under its owner; the inverted start time sorts newest first. */
+  ownerIndex: (client: string, ownerId: string, startedAt: number, id: string) =>
+    `api/${client}/${ownerId}/${String(9_999_999_999_999 - startedAt).padStart(13, "0")}-${id}`,
+  ownerPrefix: (client: string, ownerId: string) => `api/${client}/${ownerId}/`,
 };

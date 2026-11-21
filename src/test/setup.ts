@@ -62,6 +62,12 @@ export function mockR2(opts: { failPuts?: () => boolean } = {}): void {
         writeFileSync(path, body);
       },
       presign: async (key: string) => `https://r2.example.com/${key}?X-Amz-Signature=test`,
+      listKeys: async (prefix: string, limit: number, cursor?: string) => {
+        const all = [...r2.keys()].filter((k) => k.startsWith(prefix)).sort();
+        const from = cursor ? Number(cursor) : 0;
+        const next = from + limit;
+        return { keys: all.slice(from, next), cursor: next < all.length ? String(next) : undefined };
+      },
     },
   });
 }

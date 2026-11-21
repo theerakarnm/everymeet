@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "../config.js";
 
@@ -63,4 +63,15 @@ export function presign(key: string, downloadName?: string, seconds = 600): Prom
     }),
     { expiresIn: seconds },
   );
+}
+
+/** One page of keys under `prefix` in key order; pass the returned cursor to continue. */
+export async function listKeys(prefix: string, limit: number, cursor?: string): Promise<{ keys: string[]; cursor?: string }> {
+  const res = await s3().send(
+    new ListObjectsV2Command({ Bucket: config().R2_BUCKET, Prefix: prefix, MaxKeys: limit, ContinuationToken: cursor }),
+  );
+  return {
+    keys: (res.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k),
+    cursor: res.IsTruncated ? res.NextContinuationToken : undefined,
+  };
 }
