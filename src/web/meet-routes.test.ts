@@ -129,7 +129,9 @@ test("a signed-in person starts a recording with extra recipients, sees its stat
   const cookie = await signIn("gina@planthia.test");
   const started = await post("/meet/start", { url: JKU, emails: "Bob@example.com,\ncarol@planthia.test" }, { cookie });
   assert.equal(started.status, 303);
+  assert.equal(started.headers.get("location"), "/meet", "a refresh after starting does not post the form again");
   const s = activeMeets.get("abc-defg-hij")!;
+  assert.equal(s.state, "starting");
   assert.deepEqual(s.manifest.meet, {
     url: JKU,
     code: "abc-defg-hij",
