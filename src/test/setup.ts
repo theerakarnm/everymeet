@@ -84,6 +84,31 @@ export function mockEmail(opts: { fail?: (to: string) => boolean } = {}): void {
   });
 }
 
+export interface SentWebhook {
+  url: string;
+  headers: Record<string, string>;
+  body: string;
+}
+
+/** Webhook attempts that reached the fake sender, oldest first. */
+export const sentWebhooks: SentWebhook[] = [];
+
+/**
+ * Replaces the webhook sender. Call before importing code that delivers webhooks.
+ * `status` answers each attempt (default 200); throwing from it fakes a network error.
+ */
+export function mockWebhooks(opts: { status?: (w: SentWebhook) => number } = {}): void {
+  mock.module(new URL("../api/webhook-send.js", import.meta.url).href, {
+    namedExports: {
+      postWebhook: async (url: string, headers: Record<string, string>, body: string) => {
+        const w = { url, headers, body };
+        sentWebhooks.push(w);
+        return opts.status?.(w) ?? 200;
+      },
+    },
+  });
+}
+
 export interface OpenRouterCall {
   path: string;
   body: any;
