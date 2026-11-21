@@ -13,10 +13,11 @@ Every 5 minutes a finished segment is uploaded to R2 as FLAC, so a crash loses a
 If the bot dies mid-meeting, `recoverUnfinished()` closes the meeting at the last heartbeat on restart and processes what it has.
 
 Google Meet calls are recorded without Discord: anyone on `ALLOWED_EMAILS` starts one on the `/meet` web page (magic-link login, no accounts).
-A calendar trigger (invite the bot Google account to an event, found by reading its secret iCal feed) is planned but not built yet; its settings `CALENDAR_ICAL_URL` and `MEET_BOT_EMAIL` already exist.
+A calendar invitation starts one too: invite the bot Google account (`MEET_BOT_EMAIL`) to an event with a Meet link; `src/calendar/` reads the bot's secret iCal feed (`CALENDAR_ICAL_URL`) every minute and starts each due occurrence at most once when its organizer is on `ALLOWED_EMAILS`.
 The recorder runs on Cloudflare Containers (`meet/`), uploads 5-minute FLAC segments to R2 through its Durable Object, and the bot polls it and feeds the same pipeline with one mixed pseudo-participant `meet`; the minutes and failure notices go out by email (Resend REST API, one email per recipient).
 Meet recording is optional and stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
 The repo is the open-source engine only; accounts, billing, quotas, and customer-facing pages belong to a separate hosted service that calls the engine's HTTP API.
+That API under `/api/v1` (off unless `API_KEYS` is set) starts, reads, stops, and lists Meet recordings for an opaque `ownerId` and issues playback PINs; it reports through Standard Webhooks signed events from a durable outbox (`docs/api.md`).
 
 ## Hard constraint: Node 22, not Bun
 
@@ -55,9 +56,12 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 | `src/storage/keys.ts` | R2 key builders, import-free so the Worker can bundle them |
 | `src/meet/` | Google Meet side of the bot: MeetSession (poll, email notices, manifest, activeMeets), recorder client, VAD, link parsing, shared protocol.ts |
 | `src/web/` | Hono playback server, PIN flow, signed cookies, `/meet` magic-link login for `ALLOWED_EMAILS` and the recorder page (meet-routes.ts), Thai HTML templates |
+| `src/calendar/` | Calendar trigger: iCal feed reader (feed.ts, occurrences, Meet link, organizer, recipients), poller (poller.ts, every minute, organizers on `ALLOWED_EMAILS` only), occurrences already acted on (handled.ts, `DATA_DIR/calendar-handled.json`) |
+| `src/api/` | HTTP API under /api/v1: API keys (clients.ts), routes, Standard Webhooks signatures, durable webhook outbox (outbox.ts, the only webhook I/O is webhook-send.ts), event and Recording view (events.ts) |
 | `src/email/` | Resend client (send.ts, the only email I/O) and Thai email builders (messages.ts) |
 | `src/util/` | ffmpeg wrappers, concurrency limiter, logger, PIN/crypto helpers, time formatting, wav |
-| `src/test/setup.ts` | Shared test setup: fake env, in-memory R2, scripted OpenRouter fetch, fake email sender (mockEmail, sentEmails), fake meet recorder |
+| `src/test/setup.ts` | Shared test setup: fake env, in-memory R2, scripted OpenRouter fetch, fake email sender (mockEmail, sentEmails), fake webhook sender (mockWebhooks, sentWebhooks), fake meet recorder |
+| `docs/api.md` | The API contract; keep it in step with src/api/ |
 | `diag-commands.mts` | Debug script to inspect slash command registration against the Discord API |
 | `meet/` | Separate npm package: Cloudflare Worker + Durable Object (worker/) and the Playwright container runner (bot/) |
 
@@ -77,7 +81,7 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 
 - Tests use the built-in `node:test` runner with `node:assert/strict`; test files sit next to the code as `*.test.ts`.
 - Nothing in the tests talks to real Discord, Cloudflare, or OpenRouter.
-- `src/test/setup.ts` provides fake env, an in-memory R2 bucket (`mockR2()`, `r2`, `r2Text`), a scripted OpenRouter (`mockOpenRouter()`, `chatReply`), a fake email sender (`mockEmail()`, `sentEmails`), and a scripted meet-recorder Worker (`fakeMeetRecorder()`).
+- `src/test/setup.ts` provides fake env, an in-memory R2 bucket (`mockR2()`, `r2`, `r2Text`), a scripted OpenRouter (`mockOpenRouter()`, `chatReply`), a fake email sender (`mockEmail()`, `sentEmails`), a fake webhook sender (`mockWebhooks()`, `sentWebhooks`), and a scripted meet-recorder Worker (`fakeMeetRecorder()`).
 - Mocking uses `mock.module` from `node:test`, which requires the `--experimental-test-module-mocks` flag already present in the `test` script.
 - Call `mockR2()` before dynamically importing (`await import(...)`) any module under test that binds R2 functions at load time; see `pipeline/run.test.ts` for the pattern.
 - Call `mockEmail()` before dynamically importing any module that sends email; no test may send real email.
@@ -104,6 +108,8 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - Every real address lives only in `.env`; the repo is public, so code, tests, and docs use placeholders.
 - The `/meet` cookie is HMAC-signed over `user:<email>` with `SESSION_SECRET`, `HttpOnly`, `SameSite=Lax`, 12 h; `hono/csrf` on `/meet/*` (logout included) refuses form posts from other sites. Keep both.
 - `CALENDAR_ICAL_URL` and `RESEND_API_KEY` are secrets: never log them or put them in error messages.
+- API keys (`API_KEYS`) and `WEBHOOK_SECRET` are secrets: never log them; API keys are compared in constant time and a client sees only its own recordings.
+- Webhooks never carry the PIN, the transcript, the full summary, audio links, or recipients; PINs come only from `POST /api/v1/recordings/{id}/pin`, stored as a hash.
 - Resend keeps the sent emails, including the minutes PIN and the login links: limit who has access to the Resend team, and keep open and click tracking off for the sending domain (click tracking would rewrite the login and playback links through Resend).
 
 ## Deployment steps
@@ -128,6 +134,8 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 - Discord: one recording per server at a time; do not remove that invariant without redesigning storage keys.
 - Google Meet: one recording per Meet code, at most 2 Meet recordings in total (`MAX_MEET_RECORDINGS`, the Worker's `max_instances`); a start right after a recording ended can still fail for up to 30 s while the old container shuts down.
 - A recording covers whatever happens in its Meet room until it ends.
+- Calendar: the occurrences already acted on are kept in `DATA_DIR/calendar-handled.json`; deleting it can start an occurrence again while it is still within 15 minutes of its start.
+- Calendar: trust rests on the iCal `ORGANIZER` alone, and the feed delay for new invitations and whether a stranger's invite can claim an allowed organizer are not yet probed; see `### Check the calendar feed once` in README.md.
 
 ## Commits and pull requests
 

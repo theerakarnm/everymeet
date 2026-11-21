@@ -25,7 +25,89 @@ A hosted service may use it through the HTTP API.
 
 **Crash recovery:** if the bot dies mid-meeting, on restart it closes the meeting at the last heartbeat (every 15 s), processes what it has, and marks the post as recovered. Meetings that were mid-processing are retried.
 
-## Setup
+## Self-hosting
+
+Anyone can run the engine on their own server.
+It is one Node process (Docker image) plus an R2 bucket, and for Google Meet also the recorder in `meet/` on Cloudflare.
+Turn on only the surfaces you need.
+
+### What each surface needs
+
+| Surface | Needs |
+|---|---|
+| Every surface | An R2 bucket, an OpenRouter key, the public HTTPS address of the playback page, `SESSION_SECRET` |
+| Discord bot (`/record`) | A Discord application |
+| `/meet` page | The `meet/` recorder on Cloudflare Containers, `ALLOWED_EMAILS`, and a Resend key with a verified sending domain |
+| Calendar invitations | Everything the `/meet` page needs, plus the bot Google account's secret iCal address and `MEET_BOT_EMAIL`; organizers must be on `ALLOWED_EMAILS` |
+| HTTP API | The `meet/` recorder and `API_KEYS`; for webhooks `WEBHOOK_SECRET` and `WEBHOOK_URL`; Resend only for the `email` delivery mode |
+
+Discord is optional: a Meet-only engine leaves `DISCORD_TOKEN` and `DISCORD_CLIENT_ID` empty.
+
+### Minimal `.env` per surface
+
+Start from `.env.example`; every value below is a placeholder.
+All surfaces:
+
+```bash
+R2_ACCOUNT_ID=<account-id>
+R2_ACCESS_KEY_ID=<r2-access-key-id>
+R2_SECRET_ACCESS_KEY=<r2-secret-access-key>
+R2_BUCKET=meeting-recordings
+OPENROUTER_API_KEY=<openrouter-key>
+PUBLIC_BASE_URL=https://meet.example.com
+SESSION_SECRET=<openssl rand -base64 48>
+```
+
+Discord bot:
+
+```bash
+DISCORD_TOKEN=<bot-token>
+DISCORD_CLIENT_ID=<application-id>
+```
+
+`/meet` page:
+
+```bash
+MEET_RECORDER_URL=https://everymeet-meet-recorder.<subdomain>.workers.dev
+MEET_RECORDER_TOKEN=<openssl rand -base64 48>
+MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json
+ALLOWED_EMAILS=alice@example.com, @example.org
+RESEND_API_KEY=<resend-key>
+EMAIL_FROM=minutes@mail.example.com
+```
+
+Calendar invitations (on top of the `/meet` page):
+
+```bash
+MEET_BOT_EMAIL=bot@example.com
+CALENDAR_ICAL_URL=<secret iCal address of the bot account>
+```
+
+HTTP API (with `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN`):
+
+```bash
+API_KEYS=service:<openssl rand -base64 36 | tr '+/' '-_' | tr -d '='>
+WEBHOOK_SECRET=<echo "whsec_$(openssl rand -base64 32)">
+WEBHOOK_URL=https://service.example.com/webhooks/everymeet
+```
+
+The engine checks these rules at boot and names every missing setting.
+
+### Cost
+
+At most 2 Google Meet recordings run at once (`MAX_MEET_RECORDINGS`), so the recorder bill has a fixed ceiling.
+A Meet recording costs about $0.08 per recording hour for the container (standard-2), plus transcription and summary on OpenRouter for every recording, Discord included.
+R2 holds about 29 MB of mixed audio per meeting hour, plus the per-speaker tracks and the 5-minute segments.
+
+### Consent and PDPA
+
+Whoever runs the engine is the one recording people, and is responsible for their consent and for how long the recordings are kept.
+The engine announces every recording (Discord: the command channel and the voice chat; Google Meet: a Thai/English message in the Meet chat), and keeping that notice is your duty.
+Decide a retention period and set an R2 lifecycle rule for it (see Cloudflare R2 below).
+
+### Upgrading from older builds
+
+Builds before 2026-11-21 used `users.json` and `SEED_ADMIN_EMAIL`; set `ALLOWED_EMAILS` instead and delete `DATA_DIR/users.json`.
 
 ### 1. Discord application
 1. Discord Developer Portal → New Application → **Bot** → copy the token (`DISCORD_TOKEN`) and the Application ID (`DISCORD_CLIENT_ID`).
@@ -72,7 +154,7 @@ npm run dev
 | `/record` | anyone in a voice channel | joins and replies *"I am recording the voice in channel {name}"* |
 | `/end` | anyone | stops, processes, posts minutes |
 
-Google Meet calls are recorded from the web page, not from Discord (see below); a calendar trigger is planned but not built yet.
+Google Meet calls are recorded from the web page or a calendar invitation, not from Discord (see below).
 
 One recording per server at a time.
 
@@ -95,16 +177,17 @@ It stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
 The `/meet` page and the calendar trigger also need `RESEND_API_KEY` and `EMAIL_FROM`; API recordings in webhook mode need neither.
 It does not use Discord at all.
 
-Two ways to start a recording (the calendar trigger is not built yet; this describes its planned behavior):
+Two ways to start a recording:
 
 - **Web page:** open `<PUBLIC_BASE_URL>/meet`, enter your email, and open the single-use login link the bot emails (valid 15 minutes).
   This is magic-link login for the addresses and domains in `ALLOWED_EMAILS`; there are no accounts and no signup.
   Paste the Meet link, add extra recipient emails if you like, and press เริ่มบันทึก.
   The page lists your recordings with their state and a stop button.
-- **Calendar invitation (not built yet):** invite the bot Google account (`MEET_BOT_EMAIL`) to a Google Calendar event that has a Meet link.
+- **Calendar invitation:** invite the bot Google account (`MEET_BOT_EMAIL`) to a Google Calendar event that has a Meet link.
   The bot reads its calendar every minute and joins from one minute before the start until 15 minutes after it, but only when the event organizer is on `ALLOWED_EMAILS` (addresses are compared without case).
   Every occurrence of a recurring event is started at most once; deleted, cancelled, and moved occurrences are followed.
   New invitations show up only after Google refreshes the calendar feed, which can take a few minutes, so invite the bot well before the meeting.
+  Calendar starts are off unless `CALENDAR_ICAL_URL` is set; check the feed once before you rely on them (see Check the calendar feed once).
 
 Accounts, billing, and per-customer limits belong to the hosted service that uses the engine's API (`docs/api.md`), not to the engine.
 Link requests are rate limited per IP and per email address.
@@ -133,14 +216,51 @@ Never commit it and never log it.
 5. On the VPS set `MEET_RECORDER_URL`, `MEET_RECORDER_TOKEN` (same value), and `MEET_AUTH_STATE_FILE=/run/secrets/meet/meet-auth.json` in `.env`.
    Copy the session to `./secrets/meet-auth.json`, then run `chown 1000:1000` and `chmod 600` on it.
    Also set `ALLOWED_EMAILS` (the addresses and `@domains` that may sign in), `RESEND_API_KEY`, `EMAIL_FROM`, and optionally `MEET_LOGIN_MAIL_DAILY_CAP` (see .env.example).
-   `MEET_BOT_EMAIL` and `CALENDAR_ICAL_URL` are used by the calendar trigger (not built yet).
+   For calendar starts also set `MEET_BOT_EMAIL` and `CALENDAR_ICAL_URL` (step 8).
    Run `docker compose up -d --build`.
 6. Run `npm run register` once after the deploy so Discord drops the old `/record-meet` command (in the container: `docker compose exec meeting-bot node dist/register-commands.js`).
 7. Email goes out through Resend from a domain you verified there (for example `mail.example.com`).
    In Resend > API Keys create a key with "Sending access" restricted to that domain for `RESEND_API_KEY`, and set `EMAIL_FROM` to an address on it (for example `minutes@mail.example.com`).
-8. Calendar (used by the calendar trigger, not built yet): in the bot Google account set Google Calendar > Settings > Event settings > "Add invitations to my calendar" to "From everyone".
+8. Calendar (optional, for calendar starts): in the bot Google account set Google Calendar > Settings > Event settings > "Add invitations to my calendar" to "From everyone".
    Copy Settings for my calendars > Integrate calendar > "Secret address in iCal format" into `CALENDAR_ICAL_URL`.
    Treat that address like a password; if it leaks, reset it there and update `.env`.
+
+### Check the calendar feed once
+
+The calendar trigger trusts the `ORGANIZER` of an invitation in the bot's iCal feed, and two things about that feed were not tested against Google.
+Check both once with your bot account before you rely on `ALLOWED_EMAILS` for calendar starts.
+Never print or paste the secret iCal address; the commands below read it from `.env`.
+
+1. Feed delay for new invitations.
+   Run this poller, then at once create a one-off event titled `everymeet probe fresh` with a Meet link that invites the bot account:
+   ```bash
+   node --env-file=.env -e '
+   const t0 = Date.now();
+   setInterval(async () => {
+     const text = (await (await fetch(process.env.CALENDAR_ICAL_URL)).text()).replace(/\r?\n[ \t]/g, "");
+     if (text.includes("SUMMARY:everymeet probe fresh")) { console.log(`seen after ${Math.round((Date.now() - t0) / 1000)} s`); process.exit(0); }
+   }, 30_000);'
+   ```
+   If it takes longer than about 5 minutes, calendar starts work only for events created at least that long before they start.
+2. Forged organizer in an invitation from a stranger.
+   From a mailbox that is not on `ALLOWED_EMAILS`, email the bot account two iCal invitations (`text/calendar; method=REQUEST`) for tomorrow with a Meet link in `DESCRIPTION`.
+   The control names that mailbox as `ORGANIZER` and has the title `everymeet probe control`; the forged one has the title `everymeet probe forged` and names an address on `ALLOWED_EMAILS` as `ORGANIZER`.
+   After 5 minutes check the feed, with the allowed address as the argument (it prints no address):
+   ```bash
+   node --env-file=.env -e '
+   fetch(process.env.CALENDAR_ICAL_URL).then(async (r) => {
+     const raw = (await r.text()).replace(/\r?\n[ \t]/g, "");
+     for (const title of ["everymeet probe control", "everymeet probe forged"]) {
+       const block = raw.split("BEGIN:VEVENT").find((b) => b.includes(`SUMMARY:${title}`));
+       const organizer = block?.split(/\r?\n/).find((l) => l.startsWith("ORGANIZER")) ?? "";
+       console.log(title, block ? "present" : "missing", organizer.toLowerCase().endsWith(`:mailto:${process.argv[1].toLowerCase()}`) ? "organizer is the allowed address" : "");
+     }
+   });' 'alice@example.com'
+   ```
+   The control must be there; if it is not, the mail client did not send a real invitation, so send both again as a real iMIP message.
+   The forged one must be missing or show another organizer.
+   If it shows the allowed address as organizer, a stranger can make the bot record a Meet room of their choice in that person's name and email its minutes to that event's invitees.
+   Then set "Add invitations to my calendar" in the bot account to "Only if the sender is known", have every organizer email the bot account once, and check again.
 
 ### Deploy from podman
 
@@ -168,7 +288,7 @@ A new deploy needs about a minute before containers start ("no container instanc
   No restart is needed, because the file is read on every start.
 - `failure.png` can show participants' names, faces, and chat.
   The R2 lifecycle rule should delete `meetings/*/debug/` together with `meetings/*/segments/` (about 30 days, PDPA).
-- The calendar trigger (not built yet) will remember which occurrences it already handled in `DATA_DIR/calendar-handled.json`; deleting that file could make an occurrence that is still within its 15-minute window start again.
+- The calendar trigger remembers which occurrences it already handled in `DATA_DIR/calendar-handled.json`; deleting that file could make an occurrence that is still within its 15-minute window start again.
 - Login links would appear in the Nginx access log as `/meet/auth?t=...` (they expire after 15 minutes and work once); keep them out of the log with a format without the query string:
   ```nginx
   # in the http block, e.g. /etc/nginx/conf.d/noquery.conf
