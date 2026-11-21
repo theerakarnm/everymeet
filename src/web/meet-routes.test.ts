@@ -142,7 +142,7 @@ test("a signed-in person starts a recording with extra recipients, sees its stat
   });
   const listed = await (await get("/meet", cookie)).text();
   assert.match(listed, /Google Meet abc-defg-hij/);
-  assert.match(listed, /กำลังเปิดเครื่องบันทึก · จากหน้าเว็บ/);
+  assert.match(listed, /ขั้นที่ 1 จาก 3: กำลังเตรียมบอท \(ประมาณ 1 นาที\)<\/p><small>abc-defg-hij · จากหน้าเว็บ/);
   assert.equal((await post("/meet/stop", { id: s.id }, { cookie })).status, 303);
   assert.equal(worker.recordings.get(s.id)!.stopped, true);
   assert.match(await (await get("/meet", cookie)).text(), /กำลังหยุด/);

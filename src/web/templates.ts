@@ -24,9 +24,14 @@ label.next{margin-top:16px}
 .hint{color:var(--muted);font-size:13px;margin:6px 0 0}
 .meta a,.refresh{color:var(--accent)}
 .refresh{display:inline-block;margin-top:12px;font-size:14px}
-li.rec{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 2px}
+li.rec{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:12px 2px}
 li.rec small{display:block;color:var(--muted);font-size:13px}
 li.rec form{flex:none}
+li.rec>div{flex:1 1 240px;min-width:0}
+.state{display:flex;align-items:flex-start;gap:8px;margin:4px 0 2px;font-size:14px;font-weight:600}
+.steps{display:inline-flex;gap:4px;flex:none;margin-top:7px}
+.steps i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--accent)}
+.steps i.on{background:var(--accent)}
 button.stop{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--err);border:1px solid var(--err)}
 button.enable{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--accent);border:1px solid var(--accent)}
 form.inline{display:inline}
@@ -60,12 +65,20 @@ export interface MeetRecordingView {
   stopping: boolean;
 }
 
-const STATE: Record<RecordingState, string> = {
-  starting: "กำลังเปิดเครื่องบันทึก",
-  joining: "กำลังเข้าห้อง",
-  waiting: "รอผู้จัดรับเข้าห้อง",
-  recording: "กำลังบันทึก",
-  ended: "กำลังจบการบันทึก",
+/** Which of the three steps (prepare the bot, get into the room, record) each state is, and what to expect. */
+const STATE: Record<RecordingState, { step: number; text: string }> = {
+  starting: { step: 1, text: "ขั้นที่ 1 จาก 3: กำลังเตรียมบอท (ประมาณ 1 นาที)" },
+  joining: { step: 2, text: "ขั้นที่ 2 จาก 3: บอทกำลังขอเข้าห้อง" },
+  waiting: { step: 2, text: "ขั้นที่ 2 จาก 3: รอผู้จัดกดอนุญาตให้บอทเข้าห้อง" },
+  recording: { step: 3, text: "ขั้นที่ 3 จาก 3: กำลังบันทึกอยู่ในห้อง" },
+  ended: { step: 3, text: "จบแล้ว กำลังสรุปการประชุม" },
+};
+
+const stateLine = (r: MeetRecordingView) => {
+  if (r.stopping) return `<p class="state">กำลังหยุด</p>`;
+  const { step, text } = STATE[r.state];
+  const dots = [1, 2, 3].map((n) => (n <= step ? `<i class="on"></i>` : "<i></i>")).join("");
+  return `<p class="state"><span class="steps" aria-hidden="true">${dots}</span>${text}</p>`;
 };
 
 const meetCard = (title: string, body: string) =>
@@ -163,10 +176,10 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
   }) => {
     const items = o.recordings
       .map(
-        (r) => `<li class="rec"><div>${esc(r.title)}<small>${esc(r.code)} · ${r.stopping ? "กำลังหยุด" : STATE[r.state]} · ${
+        (r) => `<li class="rec"><div>${esc(r.title)}${stateLine(r)}<small>${esc(r.code)} · ${
           r.trigger === "calendar" ? "จากปฏิทิน" : "จากหน้าเว็บ"
         } · เริ่มโดย ${esc(r.startedBy)}</small></div>${
-          r.stopping
+          r.stopping || r.state === "ended"
             ? ""
             : `<form method="post" action="/meet/stop"><input type="hidden" name="id" value="${esc(r.id)}"><button class="stop" type="submit">หยุดบันทึก</button></form>`
         }</li>`,

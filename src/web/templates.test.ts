@@ -21,14 +21,32 @@ test("the recorder page lists recordings with a Thai state and a stop button, an
     values: { url: '"><script>', emails: "bob@example.com" },
   });
   assert.match(html, /Weekly &lt;standup&gt;/);
-  assert.match(html, /รอผู้จัดรับเข้าห้อง · จากปฏิทิน/);
+  assert.match(html, /<p class="state">[^<]*<span class="steps"[^>]*><i class="on"><\/i><i class="on"><\/i><i><\/i><\/span>ขั้นที่ 2 จาก 3: รอผู้จัดกดอนุญาตให้บอทเข้าห้อง<\/p><small>abc-defg-hij · จากปฏิทิน/);
   assert.match(html, /name="id" value="AbCdEfGhIjKlMnOp"/);
-  assert.match(html, /กำลังหยุด · จากหน้าเว็บ/);
+  assert.match(html, /<p class="state">กำลังหยุด<\/p><small>abc-defg-hij · จากหน้าเว็บ/);
   assert.doesNotMatch(html, /value="QrStUvWxYz012345"/, "no second stop button once stopping");
   assert.match(html, /value="&quot;&gt;&lt;script&gt;"/);
   assert.match(html, /<textarea[^>]*>bob@example.com<\/textarea>/);
   assert.match(html, /class="err">ลิงก์นี้ไม่ใช่ลิงก์ Google Meet/);
   assert.match(page.meetRecorder({ email: "a@example.com", recordings: [] }), /ยังไม่มีการบันทึกที่กำลังทำงาน/);
+});
+
+test("each recording state is one of three steps with what to expect, and the step dots fill up to the current step", () => {
+  const states = {
+    starting: [1, "ขั้นที่ 1 จาก 3: กำลังเตรียมบอท (ประมาณ 1 นาที)"],
+    joining: [2, "ขั้นที่ 2 จาก 3: บอทกำลังขอเข้าห้อง"],
+    waiting: [2, "ขั้นที่ 2 จาก 3: รอผู้จัดกดอนุญาตให้บอทเข้าห้อง"],
+    recording: [3, "ขั้นที่ 3 จาก 3: กำลังบันทึกอยู่ในห้อง"],
+    ended: [3, "จบแล้ว กำลังสรุปการประชุม"],
+  } as const;
+  for (const [state, [step, text]] of Object.entries(states)) {
+    const html = page.meetRecorder({ email: "a@example.com", recordings: [rec({ state: state as MeetRecordingView["state"] })] });
+    const dots = /<span class="steps"[^>]*>(.*?)<\/span>([^<]*)<\/p>/.exec(html)!;
+    assert.equal(dots[1]!.match(/<i class="on">/g)?.length, step, state);
+    assert.equal(dots[1]!.match(/<i/g)?.length, 3, state);
+    assert.equal(dots[2], text);
+    assert.equal(html.includes('action="/meet/stop"'), state !== "ended", "nothing to stop once the recording ended");
+  }
 });
 
 test("the login pages post to /meet and the confirm page carries the token only in a form", () => {
