@@ -108,9 +108,13 @@ export function saveLocal(m: Manifest): void {
   renameSync(tmp, join(dir, "manifest.json")); // atomic replace
 }
 
+export async function saveRemote(m: Manifest): Promise<void> {
+  await putText(keys.manifest(m.id), JSON.stringify(m), "application/json");
+}
+
 export async function saveEverywhere(m: Manifest): Promise<void> {
   saveLocal(m);
-  await putText(keys.manifest(m.id), JSON.stringify(m), "application/json");
+  await saveRemote(m);
 }
 
 export function loadLocal(id: string): Manifest | undefined {

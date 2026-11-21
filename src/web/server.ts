@@ -3,7 +3,7 @@ import { serve } from "@hono/node-server";
 import { getCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
 import { apiEnabled, config, meetPageEnabled, SAMPLE_RATE } from "../config.js";
-import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
+import { meetingTitle, type Manifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { presign } from "../storage/r2.js";
 import { SESSION_ID_RE, signAccess, verifyAccess, verifyPin } from "../util/pin.js";
@@ -12,6 +12,7 @@ import { apiRoutes } from "../api/routes.js";
 import { totalSamples } from "../pipeline/assemble.js";
 import { logger } from "../util/log.js";
 import { clientIp } from "./client-ip.js";
+import { getManifest } from "./manifest-cache.js";
 import { meetRoutes, type MeetRouteDeps } from "./meet-routes.js";
 import { page } from "./templates.js";
 
@@ -21,16 +22,6 @@ const MAX_FAILS = 5;
 const FAIL_WINDOW_MS = 15 * 60 * 1000;
 
 // ---- small caches ----------------------------------------------------------
-
-const manifestCache = new Map<string, { at: number; m: Manifest | undefined }>();
-async function getManifest(id: string): Promise<Manifest | undefined> {
-  const hit = manifestCache.get(id);
-  if (hit && Date.now() - hit.at < 60_000) return hit.m;
-  const m = await loadRemote(id);
-  // Only finished meetings are cached: the link is posted just before the "done" status is saved.
-  if (m?.status === "done") manifestCache.set(id, { at: Date.now(), m });
-  return m;
-}
 
 const failures = new Map<string, { count: number; resetAt: number }>();
 function failKey(id: string, ip: string) {

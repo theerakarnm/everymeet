@@ -6,12 +6,13 @@ import { config } from "../config.js";
 import { parseMeetUrl } from "../meet/meet-url.js";
 import { activeMeets, MAX_MEET_RECORDINGS, MeetRefused, type MeetSession, type StartMeet } from "../meet/session.js";
 import { keys } from "../storage/keys.js";
-import { loadLocal, loadRemote, type MeetManifest } from "../storage/manifest.js";
+import { loadLocal, loadRemote, saveLocal, saveRemote, type MeetManifest } from "../storage/manifest.js";
 import { getText, listKeys, putText } from "../storage/r2.js";
 import { pLimit } from "../util/limit.js";
 import { logger } from "../util/log.js";
-import { SESSION_ID_RE } from "../util/pin.js";
+import { generatePin, hashPin, SESSION_ID_RE } from "../util/pin.js";
 import { clientIp } from "../web/client-ip.js";
+import { forgetManifest } from "../web/manifest-cache.js";
 import { RateLimit } from "../web/rate-limit.js";
 import { findClient } from "./clients.js";
 import { recordingView } from "./events.js";
@@ -162,6 +163,21 @@ export function apiRoutes(deps: { startMeet: StartMeet }): Hono<ApiEnv> {
     const found = await Promise.all(ids.map((id) => load(() => findRecording(client, id))));
     const items = found.filter((r) => r !== undefined).map((r) => recordingView(r.m, r.live));
     return c.json({ items, ...(page.cursor ? { nextCursor: page.cursor } : {}) });
+  });
+
+  /** A new PIN for the playback page, returned once; only its hash is stored, and the previous PIN stops working. */
+  app.post("/recordings/:id/pin", async (c) => {
+    const client = c.get("client");
+    const r = await findRecording(client, c.req.param("id"));
+    if (!r) return fail(c, 404, "not_found", "No such recording for this API key.");
+    if (r.m.status !== "done") return fail(c, 409, "not_ready", "The minutes are not ready yet; wait for minutes.ready.");
+    const pin = generatePin();
+    r.m.pin = hashPin(pin);
+    await saveRemote(r.m);
+    if (loadLocal(r.m.id)) saveLocal(r.m); // only when CLEANUP_LOCAL=false kept the folder
+    forgetManifest(r.m.id);
+    log.info(`API client ${client} issued a new PIN for ${r.m.id}`);
+    return c.json({ pin, playbackUrl: `${config().PUBLIC_BASE_URL.replace(/\/$/, "")}/m/${r.m.id}` });
   });
 
   app.all("*", (c) => fail(c, 404, "not_found", "No such endpoint."));
