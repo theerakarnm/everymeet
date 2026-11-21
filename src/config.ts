@@ -60,9 +60,7 @@ const schema = z.object({
   MEET_MAX_DURATION_MIN: z.coerce.number().positive().max(360).default(240),
   /** Who may sign in on /meet and whose calendar events are recorded: addresses and whole domains as "@example.com", comma separated. */
   ALLOWED_EMAILS: z.preprocess(blank, z.string().optional()).transform(parseAllowlist),
-  /** Made an active admin of the Google Meet page at every boot; required when Meet recording is on. Set it only in .env, never in the code. */
-  SEED_ADMIN_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
-  /** Login emails in 24 hours, to new and existing addresses together, so the Resend quota is left for the minutes. */
+  /** Login emails in 24 hours, all addresses together, so the Resend quota is left for the minutes. */
   MEET_LOGIN_MAIL_DAILY_CAP: z.coerce.number().int().min(1).default(300),
   /** The bot Google account people invite; it never gets the minutes. Needed for calendar starts. */
   MEET_BOT_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
@@ -81,7 +79,7 @@ const schema = z.object({
     // Meet recordings are started on the web page or by calendar invitation and report by email only.
     need(c.RESEND_API_KEY, "RESEND_API_KEY", "Google Meet recording sends its minutes by email: set RESEND_API_KEY");
     need(c.EMAIL_FROM, "EMAIL_FROM", "Google Meet recording sends its minutes by email: set EMAIL_FROM");
-    need(c.SEED_ADMIN_EMAIL, "SEED_ADMIN_EMAIL", "anyone can sign up for Google Meet recording, so it needs an admin who can disable accounts: set SEED_ADMIN_EMAIL");
+    need(c.ALLOWED_EMAILS.emails.length + c.ALLOWED_EMAILS.domains.length > 0, "ALLOWED_EMAILS", "set who may sign in on the Google Meet page: ALLOWED_EMAILS");
   }
   if (c.CALENDAR_ICAL_URL) {
     need(c.MEET_RECORDER_URL, "CALENDAR_ICAL_URL", "calendar starts need MEET_RECORDER_URL and MEET_RECORDER_TOKEN");

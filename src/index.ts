@@ -5,14 +5,10 @@ import { activeMeets, MeetSession, type StartMeet } from "./meet/session.js";
 import { processMeeting, recoverUnfinished } from "./pipeline/run.js";
 import { handleInteraction, handleVoiceStateUpdate } from "./interactions.js";
 import { startWebServer } from "./web/server.js";
-import { users } from "./users/store.js";
 import { logger } from "./util/log.js";
 
 const log = logger("bot");
 const c = config(); // fail fast on bad env
-// Also fails fast: a damaged users.json stops the bot here instead of losing every account.
-const people = users();
-if (c.SEED_ADMIN_EMAIL) people.seedAdmin(c.SEED_ADMIN_EMAIL, Date.now());
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],

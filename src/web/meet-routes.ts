@@ -6,8 +6,7 @@ import { loginMail } from "../email/messages.js";
 import { sendEmail } from "../email/send.js";
 import { parseMeetUrl } from "../meet/meet-url.js";
 import { activeMeets, MAX_MEET_RECORDINGS, MeetRefused, type MeetSession, type StartMeet } from "../meet/session.js";
-import { users } from "../users/store.js";
-import { normalizeEmail, parseEmailList } from "../util/email.js";
+import { isAllowed, normalizeEmail, parseEmailList } from "../util/email.js";
 import { logger } from "../util/log.js";
 import { signUser, verifyUser } from "../util/pin.js";
 import { clientIp } from "./client-ip.js";
@@ -20,13 +19,8 @@ const USER_COOKIE = "mu";
 const USER_TTL_MS = 12 * 60 * 60 * 1000;
 const MAX_EXTRA_RECIPIENTS = 20;
 const DAY_MS = 24 * 60 * 60_000;
-/** Links to addresses without an account, all together, so a flood of fake signups cannot use up the Resend quota the minutes need. */
-const MAX_SIGNUP_EMAILS_PER_DAY = 50;
 const linksPerIp = new RateLimit(5, 15 * 60_000);
 const linksPerEmail = new RateLimit(3, 15 * 60_000);
-const signupEmails = new RateLimit(MAX_SIGNUP_EMAILS_PER_DAY, DAY_MS);
-/** New accounts per IP; counted when the first link is confirmed. Room for a team behind one office NAT. */
-const signupsPerIp = new RateLimit(10, DAY_MS);
 
 export interface MeetRouteDeps {
   startMeet: StartMeet;
@@ -34,10 +28,10 @@ export interface MeetRouteDeps {
 
 const base = () => config().PUBLIC_BASE_URL.replace(/\/$/, "");
 
-/** The signed-in person, while their cookie is valid and their account exists and is active. */
+/** The signed-in person, while their cookie is valid and their address is on ALLOWED_EMAILS (checked on every request). */
 function user(c: Context): string | undefined {
   const email = verifyUser(getCookie(c, USER_COOKIE), config().SESSION_SECRET);
-  return email && users().active(email) ? email : undefined;
+  return email && isAllowed(email, config().ALLOWED_EMAILS) ? email : undefined;
 }
 
 /** Recordings this person started or gets the minutes of. */
@@ -53,7 +47,7 @@ const view = (s: MeetSession): MeetRecordingView => ({
   stopping: s.stopping,
 });
 
-/** The Google Meet page: magic-link login (the first confirmed link creates the account), then start, follow, and stop recordings. */
+/** The Google Meet page: magic-link login for ALLOWED_EMAILS, then start, follow, and stop recordings. */
 export function meetRoutes(deps: MeetRouteDeps): Hono {
   const app = new Hono();
   const loginEmails = new RateLimit(config().MEET_LOGIN_MAIL_DAILY_CAP, DAY_MS);
@@ -61,7 +55,7 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
   // Referrer-Policy no-referrer can make them send Origin: null, so both checks stay (either one passing is enough).
   app.use("*", csrf({ origin: base() }));
   const recorderPage = (email: string, extra: { error?: string; values?: { url: string; emails: string } } = {}) =>
-    page.meetRecorder({ email, recordings: visibleTo(email).map(view), isAdmin: !!users().get(email)?.isAdmin, ...extra });
+    page.meetRecorder({ email, recordings: visibleTo(email).map(view), ...extra });
 
   app.get("/", (c) => {
     const email = user(c);
@@ -75,22 +69,18 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
     if (!linksPerIp.take(clientIp(c)) || !linksPerEmail.take(email)) {
       return c.html(page.meetLogin({ email: typed, error: "ขอลิงก์บ่อยเกินไป กรุณารอ 15 นาที" }), 429);
     }
-    const account = users().get(email);
-    if (account?.status === "disabled") {
-      log.warn(`login link not sent to ${email}: the account is disabled`);
-    } else if (!account && !signupEmails.take("all")) {
-      // Checked before the cap on all login emails, so made-up addresses cannot use that one up.
-      log.error(`login link not sent to ${email}: ${MAX_SIGNUP_EMAILS_PER_DAY} links to new addresses were sent in the last 24 hours`);
+    if (!isAllowed(email, config().ALLOWED_EMAILS)) {
+      log.warn(`login link not sent to ${email}: not on ALLOWED_EMAILS`);
     } else if (!loginEmails.take("all")) {
       log.error(`login link not sent to ${email}: ${config().MEET_LOGIN_MAIL_DAILY_CAP} login emails were sent in the last 24 hours (MEET_LOGIN_MAIL_DAILY_CAP)`);
     } else {
-      // Not awaited: an existing account must not answer slower than a new address.
+      // Not awaited: an allowed address must not answer slower than one that is not.
       sendEmail({ to: email, ...loginMail(`${base()}/meet/auth?t=${createLoginLink(email)}`) }).then(
         () => log.info(`login link sent to ${email}`),
         (err) => log.error(`could not send a login link to ${email}`, err),
       );
     }
-    // The same answer for new, existing, and disabled addresses, so the page does not tell who has an account.
+    // The same answer for every address, so the page does not tell who is on the allowlist.
     return c.html(page.meetLoginSent());
   });
 
@@ -100,13 +90,8 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
   app.post("/auth", async (c) => {
     const email = consumeLoginLink(String((await c.req.parseBody()).t ?? ""));
     if (!email) return c.html(page.meetLinkInvalid(), 400);
-    // The first confirmed link creates the account (the link proved the address); new accounts are limited per IP.
-    const isNew = !users().get(email);
-    if (isNew && !signupsPerIp.take(clientIp(c))) {
-      log.warn(`new account for ${email} refused: too many new accounts from one IP`);
-      return c.html(page.meetLogin({ error: "สร้างบัญชีใหม่จากเครือข่ายนี้ครบจำนวนของวันนี้แล้ว กรุณาลองใหม่พรุ่งนี้" }), 429);
-    }
-    if (users().signIn(email, Date.now()).status !== "active") return c.html(page.meetAccountDisabled(), 403);
+    // ALLOWED_EMAILS may have changed (restart) since the link was sent.
+    if (!isAllowed(email, config().ALLOWED_EMAILS)) return c.html(page.meetLinkInvalid(), 400);
     setCookie(c, USER_COOKIE, signUser(email, config().SESSION_SECRET, USER_TTL_MS), {
       path: "/meet",
       httpOnly: true,
@@ -114,7 +99,7 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
       sameSite: "Lax",
       maxAge: USER_TTL_MS / 1000,
     });
-    log.info(`${email} signed in to the Google Meet page${isNew ? " (new account)" : ""}`);
+    log.info(`${email} signed in to the Google Meet page`);
     return c.redirect("/meet", 303);
   });
 
@@ -167,30 +152,6 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
       );
     }
     return c.redirect("/meet", 303);
-  });
-
-  /** The signed-in person when they are an active admin; everyone else gets 404, so the admin pages do not reveal themselves. */
-  const admin = (c: Context) => {
-    const email = user(c);
-    return email && users().get(email)?.isAdmin ? email : undefined;
-  };
-
-  app.get("/admin", (c) => {
-    const email = admin(c);
-    return email ? c.html(page.meetAdmin({ email, users: users().list() })) : c.html(page.notFound(), 404);
-  });
-
-  app.post("/admin/status", async (c) => {
-    const email = admin(c);
-    if (!email) return c.html(page.notFound(), 404);
-    const body = await c.req.parseBody();
-    const target = normalizeEmail(String(body.email ?? ""));
-    const status = body.status;
-    if (!target || target === email || (status !== "active" && status !== "disabled") || !users().setStatus(target, status)) {
-      return c.html(page.meetAdmin({ email, users: users().list(), error: "เปลี่ยนสถานะบัญชีนี้ไม่ได้" }), 400);
-    }
-    log.info(`${email} set the account ${target} to ${status}`);
-    return c.redirect("/meet/admin", 303);
   });
 
   return app;

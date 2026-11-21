@@ -8,7 +8,7 @@ const worker = fakeMeetRecorder();
 process.env.TRUST_PROXY = "true"; // as behind Nginx; the tests send X-Forwarded-For
 const { createApp } = await import("./server.js");
 const { MeetSession, activeMeets } = await import("../meet/session.js");
-const { users } = await import("../users/store.js");
+const { config } = await import("../config.js");
 
 const app = createApp({ startMeet: (meet) => MeetSession.start(meet, () => {}) });
 const JKU = "https://meet.google.com/abc-defg-hij";
@@ -33,7 +33,7 @@ const tampered = (cookie: string) => {
   return cookie.slice(0, i) + (cookie[i] === "A" ? "B" : "A") + cookie.slice(i + 1);
 };
 
-/** Requests a link, takes it from the fake inbox, confirms it (which signs a new address up), and returns the cookie header value. */
+/** Requests a link, takes it from the fake inbox, confirms it, and returns the cookie header value. */
 async function signIn(email: string, ip = newIp()): Promise<string> {
   await post("/meet/login", { email });
   const res = await post("/meet/auth", { t: tokenIn(sentEmails.at(-1)!.text)! }, { ip });
@@ -50,7 +50,7 @@ afterEach(async () => {
   activeMeets.clear();
 });
 
-test("anyone gets a single-use link by email, the link only asks to confirm, and the first confirmation creates the account and signs in", async () => {
+test("an allowed address gets a single-use link by email, the link only asks to confirm, and confirming signs in", async () => {
   const first = await get("/meet");
   assert.match(await first.text(), /name="email"/);
   assert.equal(first.headers.get("cache-control"), "no-store");
@@ -63,66 +63,47 @@ test("anyone gets a single-use link by email, the link only asks to confirm, and
   assert.equal(sentEmails[0]!.to, "alice@example.com");
   const token = tokenIn(sentEmails[0]!.text)!;
   assert.ok(sentEmails[0]!.text.includes(`https://meet.example.com/meet/auth?t=${token}`));
-  assert.equal(users().get("alice@example.com"), undefined, "asking for a link creates no account");
 
   const opened = await get(`/meet/auth?t=${token}`);
   assert.match(await opened.text(), new RegExp(`name="t" value="${token}"`));
   assert.equal(opened.headers.get("set-cookie"), null, "opening the link signs nobody in");
-  assert.equal(users().get("alice@example.com"), undefined, "opening the link creates no account");
 
   const confirmed = await post("/meet/auth", { t: token });
   assert.equal(confirmed.status, 303);
   assert.equal(confirmed.headers.get("location"), "/meet");
   const cookie = confirmed.headers.get("set-cookie")!;
   for (const part of [/^mu=/, /HttpOnly/i, /Secure/i, /Path=\/meet/, /SameSite=Lax/i]) assert.match(cookie, part);
-  const alice = users().get("alice@example.com")!;
-  assert.equal(alice.status, "active");
-  assert.equal(alice.isAdmin, false);
-  assert.ok(alice.lastLoginAt);
   assert.equal((await post("/meet/auth", { t: token })).status, 400, "the link works once");
 
   const signedIn = await get("/meet", cookie.split(";")[0]);
   assert.match(await signedIn.text(), /name="url"/);
 });
 
-test("new, existing, and disabled addresses get the same answer; a disabled account gets no link; a form from another site is refused", async () => {
+test("allowed and other addresses get the same answer, only allowed ones get a link, and a form from another site is refused", async () => {
   await signIn("old@planthia.test");
-  users().signIn("off@planthia.test", Date.now());
-  users().setStatus("off@planthia.test", "disabled");
   sentEmails.length = 0;
   const answers = [];
-  for (const email of ["brand-new@nowhere.test", "old@planthia.test", "off@planthia.test"]) {
+  for (const email of ["stranger@nowhere.test", "old@planthia.test"]) {
     const res = await post("/meet/login", { email });
     answers.push([res.status, await res.text()]);
   }
   assert.deepEqual(answers[1], answers[0]);
-  assert.deepEqual(answers[2], answers[0]);
-  assert.deepEqual(sentEmails.map((e) => e.to), ["brand-new@nowhere.test", "old@planthia.test"]);
+  assert.deepEqual(sentEmails.map((e) => e.to), ["old@planthia.test"]);
   const crossSite = await app.request("/meet/login", {
     method: "POST",
     body: new URLSearchParams({ email: "old@planthia.test" }),
     headers: { "content-type": "application/x-www-form-urlencoded", "x-forwarded-for": newIp(), origin: "https://evil.test" },
   });
   assert.equal(crossSite.status, 403, "a form posted from another site is refused");
-  assert.equal(sentEmails.length, 2);
+  assert.equal(sentEmails.length, 1);
 });
 
-test("link requests are limited per email and per IP, and new accounts per IP; an existing account can still sign in from that IP", async () => {
+test("link requests are limited per email and per IP, whether or not the address is allowed", async () => {
   for (let i = 0; i < 3; i++) assert.equal((await post("/meet/login", { email: "dave@planthia.test" })).status, 200);
   assert.equal((await post("/meet/login", { email: "dave@planthia.test" })).status, 429);
   const ip = newIp();
   for (let i = 0; i < 5; i++) assert.equal((await post("/meet/login", { email: `x${i}@nowhere.test` }, { ip })).status, 200);
   assert.equal((await post("/meet/login", { email: "x9@nowhere.test" }, { ip })).status, 429);
-
-  const home = newIp();
-  await signIn("old2@planthia.test", newIp());
-  for (let i = 0; i < 10; i++) await signIn(`new${i}@nowhere.test`, home);
-  await post("/meet/login", { email: "new10@nowhere.test" });
-  const refused = await post("/meet/auth", { t: tokenIn(sentEmails.at(-1)!.text)! }, { ip: home });
-  assert.equal(refused.status, 429);
-  assert.match(await refused.text(), /สร้างบัญชีใหม่จากเครือข่ายนี้ครบจำนวน/);
-  assert.equal(users().get("new10@nowhere.test"), undefined);
-  assert.match(await signIn("old2@planthia.test", home), /^mu=/, "the limit is for new accounts only");
 });
 
 test("a signed-in person starts a recording with extra recipients, sees its state, and stops it", async () => {
@@ -198,42 +179,19 @@ test("people see and stop only recordings that are theirs, and nothing works wit
   assert.equal((await post("/meet/start", { url: JKU, emails: "" }, { cookie: tampered(ivy) })).status, 303, "a tampered cookie counts as signed out");
 });
 
-test("disabling an account signs it out at once, and a link made before that no longer signs it in", async () => {
-  const nora = await signIn("nora@planthia.test");
-  await post("/meet/login", { email: "nora@planthia.test" });
+test("an address taken off the allowlist is signed out at once, and a link sent before that no longer signs it in", async () => {
+  const allow = config().ALLOWED_EMAILS.emails;
+  allow.push("nora@nowhere.test"); // as if ALLOWED_EMAILS listed her before a restart
+  const nora = await signIn("nora@nowhere.test");
+  await post("/meet/login", { email: "nora@nowhere.test" });
   const token = tokenIn(sentEmails.at(-1)!.text)!;
-  users().setStatus("nora@planthia.test", "disabled");
+  allow.splice(allow.indexOf("nora@nowhere.test"), 1);
   assert.match(await (await get("/meet", nora)).text(), /name="email"/, "the cookie no longer works");
   assert.equal((await post("/meet/start", { url: JKU, emails: "" }, { cookie: nora })).status, 303);
   assert.equal(activeMeets.size, 0);
   const late = await post("/meet/auth", { t: token });
-  assert.equal(late.status, 403);
-  assert.match(await late.text(), /ถูกปิดการใช้งาน/);
+  assert.equal(late.status, 400);
   assert.equal(late.headers.get("set-cookie"), null);
-});
-
-test("an admin lists accounts and disables and enables them; the disabled person is signed out at once; an admin cannot change their own status", async () => {
-  users().seedAdmin("root@planthia.test", Date.now());
-  const root = await signIn("root@planthia.test");
-  const nina = await signIn("nina@planthia.test");
-  assert.match(await (await get("/meet", root)).text(), /href="\/meet\/admin"/);
-  assert.doesNotMatch(await (await get("/meet", nina)).text(), /\/meet\/admin/);
-  assert.match(await (await get("/meet/admin", root)).text(), /nina@planthia\.test/);
-  assert.equal((await post("/meet/admin/status", { email: "Nina@planthia.test", status: "disabled" }, { cookie: root })).status, 303);
-  assert.equal(users().get("nina@planthia.test")?.status, "disabled");
-  assert.match(await (await get("/meet", nina)).text(), /name="email"/, "nina's cookie no longer works");
-  assert.equal((await post("/meet/admin/status", { email: "nina@planthia.test", status: "active" }, { cookie: root })).status, 303);
-  assert.match(await (await get("/meet", nina)).text(), /name="url"/);
-  assert.equal((await post("/meet/admin/status", { email: "root@planthia.test", status: "disabled" }, { cookie: root })).status, 400);
-  assert.equal(users().get("root@planthia.test")?.status, "active");
-});
-
-test("the admin pages answer 404 to people who are not admins and to signed-out visitors", async () => {
-  const olga = await signIn("olga@planthia.test");
-  assert.equal((await get("/meet/admin", olga)).status, 404);
-  assert.equal((await get("/meet/admin")).status, 404);
-  assert.equal((await post("/meet/admin/status", { email: "olga@planthia.test", status: "disabled" }, { cookie: olga })).status, 404);
-  assert.equal(users().get("olga@planthia.test")?.status, "active");
 });
 
 test("logging out clears the cookie and goes back to the login page; the logout form is on the recorder page and refused from other sites", async () => {

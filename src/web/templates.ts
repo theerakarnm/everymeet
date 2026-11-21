@@ -1,6 +1,4 @@
 import type { RecordingState } from "../meet/protocol.js";
-import type { User } from "../users/store.js";
-import { bangkokDateTime } from "../util/time.js";
 
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
@@ -33,7 +31,6 @@ li.rec>div{flex:1 1 240px;min-width:0}
 .steps i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--accent)}
 .steps i.on{background:var(--accent)}
 button.stop{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--err);border:1px solid var(--err)}
-button.enable{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--accent);border:1px solid var(--accent)}
 form.inline{display:inline}
 button.link{width:auto;margin:12px 0 0;padding:0;background:none;border-radius:0;color:var(--accent);font-size:14px;font-weight:400;text-decoration:underline}
 button{margin-top:16px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
@@ -136,7 +133,7 @@ ${tracks ? `<h2>เสียงแยกรายคน</h2><ul>${tracks}</ul>` 
     meetCard(
       "เข้าสู่ระบบ",
       `<h1>เข้าสู่ระบบ</h1>
-<p class="meta">ใส่อีเมลของคุณ แล้วบอทจะส่งลิงก์เข้าสู่ระบบไปให้ ลิงก์ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว ยังไม่มีบัญชีก็ใส่อีเมลได้เลย การเข้าสู่ระบบครั้งแรกจะสร้างบัญชีให้</p>
+<p class="meta">ใส่อีเมลของคุณ แล้วบอทจะส่งลิงก์เข้าสู่ระบบไปให้ ถ้าอีเมลนี้ได้รับอนุญาตให้ใช้งาน ลิงก์ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว</p>
 <form method="post" action="/meet/login">
 <label for="email">อีเมล</label>
 <input id="email" name="email" type="email" autocomplete="email" required autofocus value="${esc(o.email ?? "")}">
@@ -148,12 +145,6 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
     meetCard(
       "ตรวจอีเมลของคุณ",
       `<h1>ตรวจอีเมลของคุณ</h1><p class="meta">ถ้าอีเมลนี้ใช้งานได้ ลิงก์เข้าสู่ระบบจะไปถึงภายในไม่กี่นาที ลิงก์ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว</p>`,
-    ),
-
-  meetAccountDisabled: () =>
-    meetCard(
-      "บัญชีถูกปิดการใช้งาน",
-      `<h1>บัญชีถูกปิดการใช้งาน</h1><p class="meta">บัญชีนี้ถูกปิดการใช้งาน กรุณาติดต่อผู้ดูแลระบบ</p>`,
     ),
 
   meetConfirm: (o: { token: string }) =>
@@ -175,7 +166,6 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
     recordings: MeetRecordingView[];
     error?: string;
     values?: { url: string; emails: string };
-    isAdmin?: boolean;
   }) => {
     const items = o.recordings
       .map(
@@ -202,31 +192,9 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <button type="submit">เริ่มบันทึก</button></form>
 <h2>การบันทึกของคุณ</h2>
 ${items ? `<ul>${items}</ul>` : `<p class="meta">ยังไม่มีการบันทึกที่กำลังทำงาน</p>`}
-<a class="refresh" href="/meet">รีเฟรชสถานะ</a>${o.isAdmin ? ` · <a class="refresh" href="/meet/admin">จัดการผู้ใช้</a>` : ""} · <form class="inline" method="post" action="/meet/logout"><button class="link" type="submit">ออกจากระบบ</button></form>`,
+<a class="refresh" href="/meet">รีเฟรชสถานะ</a> · <form class="inline" method="post" action="/meet/logout"><button class="link" type="submit">ออกจากระบบ</button></form>`,
       // Not over an error: the reload would drop the message and what was typed.
       !o.error && o.recordings.some((r) => SETTLING.has(r.state)) ? `<meta http-equiv="refresh" content="5">` : "",
-    );
-  },
-
-  meetAdmin: (o: { email: string; users: User[]; error?: string }) => {
-    const items = o.users
-      .map((u) => {
-        const next = u.status === "active" ? "disabled" : "active";
-        const button =
-          u.email === o.email
-            ? ""
-            : `<form method="post" action="/meet/admin/status"><input type="hidden" name="email" value="${esc(u.email)}"><input type="hidden" name="status" value="${next}"><button class="${next === "disabled" ? "stop" : "enable"}" type="submit">${
-                next === "disabled" ? "ปิดการใช้งาน" : "เปิดการใช้งาน"
-              }</button></form>`;
-        return `<li class="rec"><div>${esc(u.email)}<small>${u.isAdmin ? "ผู้ดูแล · " : ""}${
-          u.status === "active" ? "ใช้งานได้" : "ปิดการใช้งาน"
-        } · สมัครเมื่อ ${bangkokDateTime(u.createdAt)} · เข้าล่าสุด ${u.lastLoginAt ? bangkokDateTime(u.lastLoginAt) : "-"}</small></div>${button}</li>`;
-      })
-      .join("");
-    return meetCard(
-      "จัดการผู้ใช้",
-      `<h1>จัดการผู้ใช้</h1><p class="meta">${o.users.length} บัญชี · <a href="/meet">กลับหน้าบันทึก</a></p>
-${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}<ul>${items}</ul>`,
     );
   },
 };

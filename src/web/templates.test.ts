@@ -62,9 +62,8 @@ test("the recorder page reloads itself every 5 seconds only while a recording is
 
 test("the login pages post to /meet and the confirm page carries the token only in a form", () => {
   assert.match(page.meetLogin({}), /action="\/meet\/login"/);
-  assert.match(page.meetLogin({}), /การเข้าสู่ระบบครั้งแรกจะสร้างบัญชีให้/, "the same form signs people up");
+  assert.doesNotMatch(page.meetLogin({}), /สร้างบัญชี/, "there are no accounts to create");
   assert.doesNotMatch(page.meetLoginSent(), /สิทธิ์/, "the answer does not hint whether the address has an account");
-  assert.match(page.meetAccountDisabled(), /ถูกปิดการใช้งาน/);
   const confirm = page.meetConfirm({ token: "tok<en>" });
   assert.match(confirm, /action="\/meet\/auth"/);
   assert.match(confirm, /type="hidden" name="t" value="tok&lt;en&gt;"/);
@@ -74,19 +73,4 @@ test("the PIN page keeps its big centered input and no longer mentions Discord",
   const html = page.pin({ id: "AbCdEfGhIjKlMnOp", title: "daily-standup" });
   assert.match(html, /<input id="pin" class="pin"/);
   assert.doesNotMatch(html, /Discord/);
-});
-
-test("the admin page lists accounts with their state, escapes addresses, and has no button for the admin's own account", () => {
-  const html = page.meetAdmin({
-    email: "root@example.com",
-    users: [
-      { email: "root@example.com", status: "active", isAdmin: true, createdAt: Date.UTC(2026, 10, 20, 3), recentStarts: [] },
-      { email: "x<y@example.com", status: "disabled", isAdmin: false, createdAt: Date.UTC(2026, 10, 21, 3), lastLoginAt: Date.UTC(2026, 10, 21, 4), recentStarts: [] },
-    ],
-  });
-  assert.match(html, /2 บัญชี/);
-  assert.match(html, /root@example\.com<small>ผู้ดูแล · ใช้งานได้/);
-  assert.match(html, /x&lt;y@example\.com<small>ปิดการใช้งาน/);
-  assert.equal(html.match(/<form /g)?.length, 1, "only the other account has a button");
-  assert.match(html, /name="status" value="active"><button class="enable" type="submit">เปิดการใช้งาน/);
 });
