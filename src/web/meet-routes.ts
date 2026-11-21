@@ -43,7 +43,7 @@ const view = (s: MeetSession): MeetRecordingView => ({
   code: s.manifest.meet.code,
   state: s.state,
   trigger: s.manifest.meet.trigger,
-  startedBy: s.manifest.meet.startedBy,
+  startedBy: s.manifest.meet.startedBy ?? "-",
   stopping: s.stopping,
 });
 

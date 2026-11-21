@@ -1,6 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
+import type { EndReason } from "../meet/protocol.js";
 import { keys } from "./keys.js";
 import { getText, putText } from "./r2.js";
 
@@ -56,23 +57,41 @@ export interface DiscordManifest extends ManifestBase {
   startedBy: { id: string; name: string };
 }
 
+/** The API client and owner of a recording started over /api/v1. */
+export interface ApiOwner {
+  /** API client name from API_KEYS: the tenant boundary. */
+  client: string;
+  ownerId: string;
+  metadata: Record<string, string>;
+  /** "email": the engine emails as for web starts; "webhook": no email at all. */
+  delivery: "email" | "webhook";
+  /** Where this recording's webhooks go; none when unset. */
+  webhookUrl?: string;
+}
+
 /** Which Google Meet call is recorded, for whom, and who gets the minutes. */
 export interface MeetInfo {
   url: string;
   code: string;
   /** The calendar event title, or "Google Meet <code>" for a start on the web page. */
   title: string;
-  trigger: "calendar" | "web";
-  /** Email of the calendar organizer or of the person who pressed start; failure emails go here. */
-  startedBy: string;
-  /** Who gets the minutes by email: lowercase, unique, includes startedBy, never the bot account. */
+  trigger: "calendar" | "web" | "api";
+  /** Calendar organizer, web starter, or the API's delivery.starter; failure emails go here. Absent only for API recordings in webhook mode. */
+  startedBy?: string;
+  /** Who gets the minutes by email: lowercase, unique, includes startedBy when set, never the bot account. */
   recipients: string[];
+  api?: ApiOwner;
 }
 
-/** A Google Meet recording (one mixed track); its minutes are emailed. */
+/** A Google Meet recording (one mixed track); its minutes are emailed unless it reports by webhook only. */
 export interface MeetManifest extends ManifestBase {
   meet: MeetInfo;
+  /** Why it ended, for machines (the API); endReason is the Thai text for people. */
+  endCode?: EndReason | "recorder_lost";
 }
+
+/** Who gets failure and consent emails: the starter, unless the recording reports by webhook only. */
+export const emailStarter = (m: MeetManifest): string | undefined => (m.meet.api?.delivery === "webhook" ? undefined : m.meet.startedBy);
 
 export type Manifest = DiscordManifest | MeetManifest;
 

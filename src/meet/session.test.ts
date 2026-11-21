@@ -291,3 +291,14 @@ test("one recording per Meet call and at most two at once; refused starts reach 
   assert.ok(await harness(third, "dave@example.com").start(), "the slot is free again");
 });
 
+const API_WEBHOOK = { client: "service", ownerId: "team-1", metadata: { plan: "pro" }, delivery: "webhook" as const, webhookUrl: "https://service.example.com/hooks/everymeet" };
+
+test("an API recording in webhook mode emails nobody when it fails, and keeps a machine-readable end code", async () => {
+  const s = await MeetSession.start({ ...MEET, title: "API call", trigger: "api", recipients: [], api: API_WEBHOOK }, () => {});
+  assert.deepEqual(s.manifest.meet.recipients, []);
+  remote(s.id).status = { state: "ended", segments: [], end: { reason: "not_admitted", leftCleanly: true } };
+  await advance(15_000);
+  assert.equal(stored(s.id).status, "failed");
+  assert.equal(stored(s.id).endCode, "not_admitted");
+  assert.deepEqual(sentEmails, []);
+});

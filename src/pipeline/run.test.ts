@@ -381,3 +381,24 @@ test("a Meet recording where nobody spoke emails only the organizer", async () =
   assert.match(sentEmails[0]!.text, /ไม่พบเสียงพูด/);
   assert.equal(manifestIn(m.id).status, "done");
 });
+
+const apiMeet = (delivery: "email" | "webhook", o: { silent?: boolean } = {}) => {
+  const m = meetRecording(o);
+  const api = { client: "service", ownerId: "team-1", metadata: { plan: "pro" }, delivery, webhookUrl: "https://service.example.com/hooks/everymeet" };
+  return delivery === "webhook"
+    ? { ...m, meet: { ...m.meet, trigger: "api" as const, startedBy: undefined, recipients: [], api } }
+    : { ...m, meet: { ...m.meet, trigger: "api" as const, api } };
+};
+
+test("a Google Meet API recording in webhook mode is processed and done without any email", async () => {
+  const m = apiMeet("webhook");
+  sentEmails.length = 0;
+  mockOpenRouter((call) =>
+    call.path === "/audio/transcriptions"
+      ? Response.json({ text: "", segments: [{ start: 0.3, end: 3, text: "สวัสดีครับ" }] })
+      : chatReply(call.body.max_tokens <= 2_000 ? SHORT : FULL),
+  );
+  await processMeeting(discord([]).client, m as any);
+  assert.deepEqual(sentEmails, []);
+  assert.equal(manifestIn(m.id).status, "done");
+});

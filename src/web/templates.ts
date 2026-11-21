@@ -57,7 +57,7 @@ export interface MeetRecordingView {
   title: string;
   code: string;
   state: RecordingState;
-  trigger: "calendar" | "web";
+  trigger: "calendar" | "web" | "api";
   startedBy: string;
   stopping: boolean;
 }
@@ -170,7 +170,7 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
     const items = o.recordings
       .map(
         (r) => `<li class="rec"><div>${esc(r.title)}${stateLine(r)}<small>${esc(r.code)} · ${
-          r.trigger === "calendar" ? "จากปฏิทิน" : "จากหน้าเว็บ"
+          r.trigger === "calendar" ? "จากปฏิทิน" : r.trigger === "api" ? "จาก API" : "จากหน้าเว็บ"
         } · เริ่มโดย ${esc(r.startedBy)}</small></div>${
           r.stopping || r.state === "ended"
             ? ""

@@ -3,7 +3,7 @@ import type { Client } from "discord.js";
 import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { sendEmail } from "../email/send.js";
 import { minutesMail, processingFailedMail } from "../email/messages.js";
-import { meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest, type MeetManifest } from "../storage/manifest.js";
+import { emailStarter, meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest, type MeetManifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { putFile, putText } from "../storage/r2.js";
 import { generatePin, hashPin } from "../util/pin.js";
@@ -85,8 +85,9 @@ async function run(client: Client, m: Manifest): Promise<void> {
     if (t.failedChunks > 0) notes.push(`ถอดเสียงไม่สำเร็จ ${t.failedChunks} จาก ${t.totalChunks} ช่วง`);
     const note = notes.join(" / ") || undefined;
     if (m.meet) {
-      // Nobody spoke (the meeting did not happen): only the organizer or starter is told.
-      await emailMinutes(m, t.lines.length > 0 ? m.meet.recipients : [m.meet.startedBy], { pin, shortSummary: short, note });
+      const starter = emailStarter(m);
+      // Webhook mode: the caller sends its own emails after minutes.ready. Nobody spoke: only the starter is told.
+      if (starter) await emailMinutes(m, t.lines.length > 0 ? m.meet.recipients : [starter], { pin, shortSummary: short, note });
     } else {
       m.outputs.postedMessageUrl = await publishMinutes(client, m, {
         pin,
@@ -111,8 +112,11 @@ async function run(client: Client, m: Manifest): Promise<void> {
       saveLocal(m);
     }
     if (m.meet) {
-      await sendEmail({ to: m.meet.startedBy, ...processingFailedMail({ id: m.id, title: m.meet.title, startedAt: m.startedAt, error: m.error }) })
-        .catch((e) => log.error(`could not email the failure of ${m.id}`, e));
+      const starter = emailStarter(m);
+      if (starter) {
+        await sendEmail({ to: starter, ...processingFailedMail({ id: m.id, title: m.meet.title, startedAt: m.startedAt, error: m.error }) })
+          .catch((e) => log.error(`could not email the failure of ${m.id}`, e));
+      }
     } else {
       await notifyFailure(client, m, m.error);
     }
@@ -129,7 +133,7 @@ async function emailMinutes(m: MeetManifest, recipients: string[], o: { pin: str
     title: m.meet.title,
     startedAt: m.startedAt,
     seconds: totalSamples(m) / SAMPLE_RATE,
-    startedBy: m.meet.startedBy,
+    startedBy: m.meet.startedBy ?? "-",
     endReason: m.endReason,
     ...o,
   });

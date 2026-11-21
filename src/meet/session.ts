@@ -2,7 +2,7 @@ import { readFileSync, rmSync } from "node:fs";
 import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { consentMissingMail, describeMeetEnd, notRecordedMail, type Mail } from "../email/messages.js";
 import { sendEmail } from "../email/send.js";
-import { meetingDir, saveEverywhere, saveLocal, type MeetInfo, type MeetManifest } from "../storage/manifest.js";
+import { emailStarter, meetingDir, saveEverywhere, saveLocal, type MeetInfo, type MeetManifest } from "../storage/manifest.js";
 import { logger } from "../util/log.js";
 import { newSessionId } from "../util/pin.js";
 import { MEET_PARTICIPANT_ID, type RecordingState, type RecordingStatus } from "./protocol.js";
@@ -73,7 +73,7 @@ export class MeetSession {
     if (activeMeets.size >= MAX_MEET_RECORDINGS) throw new MeetRefused("busy");
     const manifest: MeetManifest = {
       id: newSessionId(),
-      meet: { ...meet, recipients: [...new Set([meet.startedBy, ...meet.recipients])] },
+      meet: { ...meet, recipients: [...new Set([meet.startedBy, ...meet.recipients].filter((e): e is string => !!e))] },
       startedAt: now,
       heartbeatAt: now,
       status: "recording",
@@ -102,7 +102,7 @@ export class MeetSession {
     }
     await s.save();
     s.tick = setInterval(() => void s.poll(), TICK_MS);
-    log.info(`recording Google Meet ${meet.code} as ${manifest.id} (${meet.trigger}, started by ${meet.startedBy})`);
+    log.info(`recording Google Meet ${meet.code} as ${manifest.id} (${meet.trigger}, started by ${meet.startedBy ?? `API client ${meet.api?.client}`})`);
     return s;
   }
 
@@ -208,13 +208,14 @@ export class MeetSession {
     const end = status?.end;
     const segments = status?.segments ?? [];
     m.endReason = this.stopReason ?? describeMeetEnd(end?.reason);
+    m.endCode = this.stopReason ? "stopped" : (end?.reason ?? "recorder_lost");
 
     if (!status || status.captureStartedAt === undefined || segments.length === 0) {
       m.status = "failed";
       m.endedAt = Date.now();
       m.error = `nothing was recorded (${end ? `${end.reason}${end.detail ? `: ${end.detail}` : ""}` : "the recorder lost this recording"})`;
       await this.save();
-      await this.email(notRecordedMail({ title: m.meet.title, code: this.code, end }));
+      await this.email(notRecordedMail({ title: m.meet.title, code: this.code, end, api: !!m.meet.api }));
       log.warn(`Google Meet recording ${m.id} ended without audio: ${m.error}`);
       return;
     }
@@ -247,9 +248,10 @@ export class MeetSession {
     }
   }
 
-  /** Emails the person who started the recording; a failed email is logged, never fatal. */
+  /** Emails the person who started the recording (never in webhook mode); a failed email is logged, never fatal. */
   private async email(mail: Mail): Promise<void> {
-    const to = this.manifest.meet.startedBy;
+    const to = emailStarter(this.manifest);
+    if (!to) return;
     try {
       await sendEmail({ to, ...mail });
     } catch (err) {

@@ -90,7 +90,7 @@ export function minutesMail(o: {
   ]);
 }
 
-export function notRecordedMail(o: { title: string; code: string; end?: RecordingEnd }): Mail {
+export function notRecordedMail(o: { title: string; code: string; end?: RecordingEnd; api?: boolean }): Mail {
   const room = `ห้อง Google Meet ${o.code}`;
   let why: string;
   if (o.end?.detail?.startsWith("container start failed")) {
@@ -115,7 +115,7 @@ export function notRecordedMail(o: { title: string; code: string; end?: Recordin
         why = `บันทึก${room}ไม่ได้ (${describeMeetEnd(o.end?.reason)})`;
     }
   }
-  return mail(`บันทึก Google Meet ไม่สำเร็จ - ${o.title}`, [why, ...(meetPageEnabled() ? [{ url: `${base()}/meet`, label: "เริ่มบันทึกใหม่" }] : [])]);
+  return mail(`บันทึก Google Meet ไม่สำเร็จ - ${o.title}`, [why, ...(meetPageEnabled() && !o.api ? [{ url: `${base()}/meet`, label: "เริ่มบันทึกใหม่" }] : [])]);
 }
 
 export function consentMissingMail(o: { title: string; code: string }): Mail {
