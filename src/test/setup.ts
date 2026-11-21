@@ -29,6 +29,7 @@ Object.assign(process.env, {
   MEET_RECORDER_URL: "https://meet-recorder.example.com",
   MEET_RECORDER_TOKEN: "m".repeat(40),
   MEET_AUTH_STATE_FILE: join(dataDir, "meet-auth.json"),
+  ALLOWED_EMAILS: "@example.com, @planthia.test",
   SEED_ADMIN_EMAIL: "admin@example.com",
   MEET_BOT_EMAIL: "bot@example.com",
   CALENDAR_ICAL_URL: "https://calendar.example.com/calendar/ical/bot/private-secret/basic.ics",

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { invalidAllowlistEntries, parseAllowlist } from "./util/email.js";
 
 const bool = z
   .string()
@@ -57,6 +58,8 @@ const schema = z.object({
   MEET_AUTH_STATE_FILE: z.preprocess(blank, z.string().optional()),
   /** A Google Meet recording ends after this many minutes; the Worker refuses more than 6 h. */
   MEET_MAX_DURATION_MIN: z.coerce.number().positive().max(360).default(240),
+  /** Who may sign in on /meet and whose calendar events are recorded: addresses and whole domains as "@example.com", comma separated. */
+  ALLOWED_EMAILS: z.preprocess(blank, z.string().optional()).transform(parseAllowlist),
   /** Made an active admin of the Google Meet page at every boot; required when Meet recording is on. Set it only in .env, never in the code. */
   SEED_ADMIN_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
   /** Login emails in 24 hours, to new and existing addresses together, so the Resend quota is left for the minutes. */
@@ -83,6 +86,9 @@ const schema = z.object({
   if (c.CALENDAR_ICAL_URL) {
     need(c.MEET_RECORDER_URL, "CALENDAR_ICAL_URL", "calendar starts need MEET_RECORDER_URL and MEET_RECORDER_TOKEN");
     need(c.MEET_BOT_EMAIL, "MEET_BOT_EMAIL", "calendar starts need MEET_BOT_EMAIL");
+  }
+  for (const bad of invalidAllowlistEntries(c.ALLOWED_EMAILS)) {
+    need(false, "ALLOWED_EMAILS", `"${bad}" is neither an email address nor an @domain`);
   }
 });
 
