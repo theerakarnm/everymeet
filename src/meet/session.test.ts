@@ -14,6 +14,7 @@ const worker = fakeMeetRecorder();
 const { MeetSession, MeetRefused, activeMeets } = await import("./session.js");
 const { keys } = await import("../storage/keys.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
+const { pendingWebhooks } = await import("../api/outbox.js");
 
 const MIN = 60_000;
 const NOW = Date.UTC(2026, 9, 12, 3, 0, 0);
@@ -300,5 +301,36 @@ test("an API recording in webhook mode emails nobody when it fails, and keeps a 
   await advance(15_000);
   assert.equal(stored(s.id).status, "failed");
   assert.equal(stored(s.id).endCode, "not_admitted");
+  assert.deepEqual(sentEmails, []);
+});
+
+const hooksFor = (id: string) => pendingWebhooks().map((e) => JSON.parse(e.body)).filter((b) => b.data.id === id);
+
+test("an API recording reports a failed chat notice and its end by webhook, and emails nobody in webhook mode", async () => {
+  const s = await MeetSession.start({ ...MEET, title: "API call", trigger: "api", recipients: [], api: API_WEBHOOK }, () => {});
+  remote(s.id).status = { state: "recording", captureStartedAt: NOW + MIN, consentPosted: false, segments: [] };
+  await advance(15_000);
+  remote(s.id).status = {
+    state: "ended",
+    captureStartedAt: NOW + MIN,
+    consentPosted: false,
+    segments: [{ index: 0, samples: SAMPLE_RATE * 60 }],
+    end: { reason: "alone", leftCleanly: true },
+  };
+  await advance(15_000);
+  const hooks = hooksFor(s.id);
+  assert.deepEqual(hooks.map((h) => h.type), ["recording.notice_failed", "recording.ended"]);
+  const ended = hooks[1].data;
+  assert.equal(ended.client, "service");
+  assert.equal(ended.ownerId, "team-1");
+  assert.deepEqual(ended.metadata, { plan: "pro" });
+  assert.equal(ended.state, "processing");
+  assert.equal(ended.endCode, "alone");
+  assert.equal(ended.durationSeconds, 60);
+  assert.equal(ended.meetCode, MEET.code);
+  for (const h of hooks) {
+    assert.equal("pin" in h.data, false);
+    assert.equal("recipients" in h.data, false);
+  }
   assert.deepEqual(sentEmails, []);
 });

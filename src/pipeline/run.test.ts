@@ -19,6 +19,7 @@ const { keys } = await import("../storage/keys.js");
 const { TrackWriter } = await import("../recorder/track-writer.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 const { verifyPin, newSessionId } = await import("../util/pin.js");
+const { pendingWebhooks } = await import("../api/outbox.js");
 
 const sec = (s: number) => Math.round(s * SAMPLE_RATE);
 const tone = (seconds: number, freq: number) => {
@@ -390,7 +391,7 @@ const apiMeet = (delivery: "email" | "webhook", o: { silent?: boolean } = {}) =>
     : { ...m, meet: { ...m.meet, trigger: "api" as const, api } };
 };
 
-test("a Google Meet API recording in webhook mode is processed and done without any email", async () => {
+test("a Google Meet API recording in webhook mode emails nobody and queues minutes.ready with the short summary but no PIN", async () => {
   const m = apiMeet("webhook");
   sentEmails.length = 0;
   mockOpenRouter((call) =>
@@ -401,4 +402,27 @@ test("a Google Meet API recording in webhook mode is processed and done without 
   await processMeeting(discord([]).client, m as any);
   assert.deepEqual(sentEmails, []);
   assert.equal(manifestIn(m.id).status, "done");
+  const ready = pendingWebhooks().map((e) => JSON.parse(e.body)).find((b) => b.data.id === m.id && b.type === "minutes.ready")!;
+  assert.equal(ready.data.state, "done");
+  assert.equal(ready.data.summaryShort, SHORT);
+  assert.equal(ready.data.playbackUrl, `https://meet.example.com/m/${m.id}`);
+  assert.equal("pin" in ready.data, false);
+});
+
+test("a Google Meet API recording whose processing fails queues recording.failed and, in email mode, emails the starter", async () => {
+  const m = apiMeet("email");
+  sentEmails.length = 0;
+  mockOpenRouter((call) =>
+    call.path === "/audio/transcriptions"
+      ? Response.json({ text: "", segments: [{ start: 0.3, end: 3, text: "สวัสดีครับ" }] })
+      : new Response("bad request", { status: 400 }), // 4xx is not retried (src/pipeline/openrouter.ts withRetry), so both summary models fail at once
+  );
+  await processMeeting(discord([]).client, m as any);
+  assert.equal(manifestIn(m.id).status, "failed");
+  const failed = pendingWebhooks().map((e) => JSON.parse(e.body)).find((b) => b.data.id === m.id)!;
+  assert.equal(failed.type, "recording.failed");
+  assert.equal(failed.data.state, "failed");
+  assert.ok(failed.data.error);
+  assert.deepEqual(sentEmails.map((e) => e.to), ["alice@planthia.test"]);
+  assert.match(sentEmails[0]!.subject, /ประมวลผลบันทึกการประชุมไม่สำเร็จ/);
 });

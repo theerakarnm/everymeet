@@ -1,5 +1,6 @@
 import { rmSync } from "node:fs";
 import type { Client } from "discord.js";
+import { emitWebhook } from "../api/events.js";
 import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { sendEmail } from "../email/send.js";
 import { minutesMail, processingFailedMail } from "../email/messages.js";
@@ -100,6 +101,7 @@ async function run(client: Client, m: Manifest): Promise<void> {
 
     m.status = "done";
     await saveEverywhere(m);
+    if (m.meet) emitWebhook(m, "minutes.ready", short);
     log.info(`done ${m.id} in ${Math.round((Date.now() - started) / 1000)}s`);
     if (config().CLEANUP_LOCAL) rmSync(meetingDir(m.id), { recursive: true, force: true });
   } catch (err) {
@@ -117,6 +119,7 @@ async function run(client: Client, m: Manifest): Promise<void> {
         await sendEmail({ to: starter, ...processingFailedMail({ id: m.id, title: m.meet.title, startedAt: m.startedAt, error: m.error }) })
           .catch((e) => log.error(`could not email the failure of ${m.id}`, e));
       }
+      emitWebhook(m, "recording.failed");
     } else {
       await notifyFailure(client, m, m.error);
     }

@@ -1,4 +1,5 @@
 import { readFileSync, rmSync } from "node:fs";
+import { emitWebhook } from "../api/events.js";
 import { config, MEET_ADMIT_TIMEOUT_MS, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
 import { consentMissingMail, describeMeetEnd, notRecordedMail, type Mail } from "../email/messages.js";
 import { sendEmail } from "../email/send.js";
@@ -192,8 +193,11 @@ export class MeetSession {
       uploaded: [],
     };
     await this.save();
-    // The Meet chat notice is the only consent notice; if it failed, the starter has to tell people.
-    if (!status.consentPosted) await this.email(consentMissingMail({ title: this.manifest.meet.title, code: this.code }));
+    // The Meet chat notice is the only consent notice; if it failed, the starter (or, in webhook mode, the caller) must tell people.
+    if (!status.consentPosted) {
+      await this.email(consentMissingMail({ title: this.manifest.meet.title, code: this.code }));
+      emitWebhook(this.manifest, "recording.notice_failed");
+    }
   }
 
   private finish(status: RecordingStatus | undefined): Promise<void> {
@@ -216,6 +220,7 @@ export class MeetSession {
       m.error = `nothing was recorded (${end ? `${end.reason}${end.detail ? `: ${end.detail}` : ""}` : "the recorder lost this recording"})`;
       await this.save();
       await this.email(notRecordedMail({ title: m.meet.title, code: this.code, end, api: !!m.meet.api }));
+      emitWebhook(m, "recording.failed");
       log.warn(`Google Meet recording ${m.id} ended without audio: ${m.error}`);
       return;
     }
@@ -236,6 +241,7 @@ export class MeetSession {
     m.status = "processing";
     await this.save();
     log.info(`Google Meet recording ${m.id} ended: ${m.endReason}`);
+    emitWebhook(m, "recording.ended");
     this.onFinished(m);
   }
 

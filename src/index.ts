@@ -1,4 +1,5 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
+import { startOutbox } from "./api/outbox.js";
 import { config } from "./config.js";
 import { activeSessions } from "./recorder/session.js";
 import { activeMeets, MeetSession, type StartMeet } from "./meet/session.js";
@@ -40,6 +41,7 @@ process.on("unhandledRejection", (err) => log.error("unhandled rejection", err))
 
 // Google Meet recordings run on Cloudflare and need no Discord login: re-attach them before anything can start a new one.
 await recoverUnfinished(client, "meet");
+startOutbox();
 startWebServer({ startMeet });
 if (c.DISCORD_TOKEN) await client.login(c.DISCORD_TOKEN);
 else log.info("Discord is off (DISCORD_TOKEN is not set)");
