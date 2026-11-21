@@ -7,3 +7,8 @@ data
 rust/**/target/
 rust/spikes/**/spike-out/
 secrets/
+# Local env files of any name; only the example is tracked
+.env.*
+!.env.example
+# Exploration code, kept locally only
+spike/
