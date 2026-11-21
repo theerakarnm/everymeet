@@ -176,6 +176,18 @@ A new deploy needs about a minute before containers start ("no container instanc
   Nginx error log lines can still show the query when the upstream fails; they are rare and the link works only once.
 - Resend allows 10 API requests per second per team and has a monthly quota (and a daily one on the free plan); a log line `email to ... failed: HTTP 429 daily_quota_exceeded` (or `monthly_quota_exceeded`, `rate_limit_exceeded`) says why mails stopped, and Resend > Logs shows every send.
 
+## HTTP API
+
+The engine has a versioned HTTP API under `/api/v1` that starts, reads, stops, and lists Google Meet recordings for another program, issues playback PINs, and reports with signed webhooks.
+It is off unless `API_KEYS` is set.
+See [docs/api.md](docs/api.md) for the endpoints, the Recording object, errors, and webhook verification.
+
+- `API_KEYS`: API clients as `name:key` pairs, comma separated; list one name twice with two keys to rotate a key without downtime.
+- `API_RATE_LIMIT_PER_MIN`: requests per minute for each API client (default 120).
+- `WEBHOOK_SECRET`: the Standard Webhooks signing secret, made with `echo "whsec_$(openssl rand -base64 32)"`.
+- `WEBHOOK_URL`: the default webhook URL for API recordings, https (http only on localhost).
+- `WEBHOOK_ALLOWED_ORIGINS`: more origins a start request may name in `webhookUrl`, comma separated.
+
 ## Things to know
 - **Runtime is Node 22, not Bun.** `@discordjs/voice` requires Node ≥ 22.12 for receiving audio and for Discord's voice encryption (DAVE, via the bundled `@snazzah/davey`). Hono is still used for the web page.
 - **Discord doesn't officially document receiving audio.** `@discordjs/voice` supports it, but a Discord change could break it; pin versions and test after upgrades.
