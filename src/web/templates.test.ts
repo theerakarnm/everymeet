@@ -49,6 +49,17 @@ test("each recording state is one of three steps with what to expect, and the st
   }
 });
 
+test("the recorder page reloads itself every 5 seconds only while a recording is still getting into the room, and never over an error", () => {
+  const REFRESH = '<meta http-equiv="refresh" content="5">';
+  const with_ = (...states: MeetRecordingView["state"][]) =>
+    page.meetRecorder({ email: "a@example.com", recordings: states.map((state) => rec({ state })) });
+  for (const state of ["starting", "joining", "waiting"] as const) assert.ok(with_("recording", state).includes(REFRESH), state);
+  assert.ok(!with_("recording", "ended").includes(REFRESH));
+  assert.ok(!with_().includes(REFRESH));
+  const failed = page.meetRecorder({ email: "a@example.com", recordings: [rec({ state: "starting" })], error: "x", values: { url: "u", emails: "" } });
+  assert.ok(!failed.includes(REFRESH), "a reload would drop the error and what was typed");
+});
+
 test("the login pages post to /meet and the confirm page carries the token only in a form", () => {
   assert.match(page.meetLogin({}), /action="\/meet\/login"/);
   assert.match(page.meetLogin({}), /การเข้าสู่ระบบครั้งแรกจะสร้างบัญชีให้/, "the same form signs people up");

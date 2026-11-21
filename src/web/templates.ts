@@ -47,9 +47,9 @@ li a:hover{color:var(--accent)}
 li span{color:var(--muted);font-size:13px;white-space:nowrap}
 `;
 
-function shell(title: string, body: string): string {
+function shell(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>${esc(title)}</title>
+<meta name="robots" content="noindex,nofollow">${head}<title>${esc(title)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600&display=swap">
 <style>${STYLE}</style></head><body><main>${body}</main></body></html>`;
 }
@@ -81,8 +81,11 @@ const stateLine = (r: MeetRecordingView) => {
   return `<p class="state"><span class="steps" aria-hidden="true">${dots}</span>${text}</p>`;
 };
 
-const meetCard = (title: string, body: string) =>
-  shell(title, `<div class="card"><p class="eyebrow">บันทึก Google Meet</p>${body}</div>`);
+const meetCard = (title: string, body: string, head = "") =>
+  shell(title, `<div class="card"><p class="eyebrow">บันทึก Google Meet</p>${body}</div>`, head);
+
+/** States in which the page reloads itself, so people see the bot get into the room without pressing refresh. */
+const SETTLING: ReadonlySet<RecordingState> = new Set(["starting", "joining", "waiting"]);
 
 export const page = {
   notFound: () =>
@@ -200,6 +203,8 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <h2>การบันทึกของคุณ</h2>
 ${items ? `<ul>${items}</ul>` : `<p class="meta">ยังไม่มีการบันทึกที่กำลังทำงาน</p>`}
 <a class="refresh" href="/meet">รีเฟรชสถานะ</a>${o.isAdmin ? ` · <a class="refresh" href="/meet/admin">จัดการผู้ใช้</a>` : ""} · <form class="inline" method="post" action="/meet/logout"><button class="link" type="submit">ออกจากระบบ</button></form>`,
+      // Not over an error: the reload would drop the message and what was typed.
+      !o.error && o.recordings.some((r) => SETTLING.has(r.state)) ? `<meta http-equiv="refresh" content="5">` : "",
     );
   },
 
