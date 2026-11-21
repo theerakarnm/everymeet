@@ -131,6 +131,6 @@ cd meet && npm run meet:login   # one-time bot Google account sign-in (podman)
 
 ## Commits and pull requests
 
-- There is no established convention yet (the repo has a single init commit); use short imperative subjects, for example `fix recorder drop on late speaker join`.
+- Use Conventional Commits with short imperative lowercase subjects under 50 characters, for example `fix(recorder): drop on late speaker join`.
 - Keep commits scoped to one subsystem (recorder, pipeline, web, storage) where practical.
 - Commits from outside contributors carry a DCO sign-off (`git commit -s`); maintainers check it before merging.
