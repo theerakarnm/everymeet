@@ -1,3 +1,4 @@
+import { config } from "../config.js";
 import type { RecordingState } from "../meet/protocol.js";
 
 const esc = (s: string) =>
@@ -42,13 +43,14 @@ li{border-bottom:1px solid var(--line)}
 li a{display:flex;justify-content:space-between;gap:12px;padding:12px 2px;color:var(--text);text-decoration:none}
 li a:hover{color:var(--accent)}
 li span{color:var(--muted);font-size:13px;white-space:nowrap}
+footer{text-align:center;margin-top:16px;font-size:12px;color:var(--muted)}footer a{color:var(--muted)}
 `;
 
 function shell(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="robots" content="noindex,nofollow">${head}<title>${esc(title)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600&display=swap">
-<style>${STYLE}</style></head><body><main>${body}</main></body></html>`;
+<style>${STYLE}</style></head><body><main>${body}<footer><a href="${esc(config().SOURCE_CODE_URL)}">ซอร์สโค้ด</a> · AGPL-3.0</footer></main></body></html>`;
 }
 
 /** One Google Meet recording as the recorder page lists it. */

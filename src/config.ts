@@ -32,6 +32,8 @@ const schema = z.object({
 
   /** Public HTTPS origin of the playback page, e.g. https://meet.example.com */
   PUBLIC_BASE_URL: z.url(),
+  /** Where people who use this engine's pages get its source (AGPL section 13); point it at your fork if you change the code. */
+  SOURCE_CODE_URL: z.preprocess(blank, z.url().default("https://github.com/theerakarnm/everymeet")),
   WEB_PORT: z.coerce.number().int().default(8787),
   /** Long random string used to sign playback cookies. */
   SESSION_SECRET: z.string().min(32),

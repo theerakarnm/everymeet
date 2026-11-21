@@ -1,3 +1,4 @@
+import "../test/setup.js";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { page, type MeetRecordingView } from "./templates.js";
@@ -73,4 +74,10 @@ test("the PIN page keeps its big centered input and no longer mentions Discord",
   const html = page.pin({ id: "AbCdEfGhIjKlMnOp", title: "daily-standup" });
   assert.match(html, /<input id="pin" class="pin"/);
   assert.doesNotMatch(html, /Discord/);
+});
+
+test("every page links the source code under its license", () => {
+  for (const html of [page.notFound(), page.pin({ id: "AbCdEfGhIjKlMnOp", title: "t" }), page.meetLogin({})]) {
+    assert.match(html, /<footer><a href="https:\/\/github\.com\/[^"]+\/everymeet">ซอร์สโค้ด<\/a> · AGPL-3\.0<\/footer>/);
+  }
 });
