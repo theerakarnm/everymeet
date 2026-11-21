@@ -170,24 +170,11 @@ test("bad input, a recorder error, and the limits are explained on the page", as
   const twice = await post("/meet/start", { url: "abc-defg-hij", emails: "" }, { cookie });
   assert.equal(twice.status, 409);
   assert.match(await twice.text(), /กำลังถูกบันทึกอยู่แล้ว/);
-  const mine = await post("/meet/start", { url: "https://meet.google.com/pqr-stuv-wxy", emails: "" }, { cookie });
-  assert.equal(mine.status, 409);
-  assert.match(await mine.text(), /อยู่ 1 ห้อง ซึ่งเป็นจำนวนสูงสุดต่อคน/);
-  const ken = await signIn("ken@planthia.test");
-  assert.equal((await post("/meet/start", { url: "https://meet.google.com/pqr-stuv-wxy", emails: "" }, { cookie: ken })).status, 303);
+  assert.equal((await post("/meet/start", { url: "https://meet.google.com/pqr-stuv-wxy", emails: "" }, { cookie })).status, 303, "one person may run both slots");
   const lee = await signIn("lee@planthia.test");
   const third = await post("/meet/start", { url: "https://meet.google.com/xyz-abcd-efg", emails: "" }, { cookie: lee });
   assert.equal(third.status, 503);
   assert.match(await third.text(), /2 ห้องแล้ว/);
-});
-
-test("a person who used up the daily limit is told so and nothing is started", async () => {
-  const cookie = await signIn("mia@planthia.test");
-  for (let i = 0; i < 5; i++) users().recordStart("mia@planthia.test", Date.now());
-  const res = await post("/meet/start", { url: JKU, emails: "" }, { cookie });
-  assert.equal(res.status, 429);
-  assert.match(await res.text(), /ครบ 5 ครั้งใน 24 ชั่วโมง/);
-  assert.equal(activeMeets.size, 0);
 });
 
 test("people see and stop only recordings that are theirs, and nothing works without a valid cookie", async () => {

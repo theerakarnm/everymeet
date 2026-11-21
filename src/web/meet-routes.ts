@@ -138,14 +138,9 @@ export function meetRoutes(deps: MeetRouteDeps): Hono {
       await deps.startMeet({ ...meet, title: `Google Meet ${meet.code}`, trigger: "web", startedBy: email, recipients: emails });
     } catch (err) {
       if (err instanceof MeetRefused) {
-        const limits = config();
         switch (err.reason) {
           case "already_recording":
             return again("ห้อง Google Meet นี้กำลังถูกบันทึกอยู่แล้ว", 409);
-          case "user_busy":
-            return again(`คุณกำลังบันทึกอยู่ ${limits.MEET_MAX_ACTIVE_PER_USER} ห้อง ซึ่งเป็นจำนวนสูงสุดต่อคน กรุณาหยุดหรือรอให้ห้องเดิมจบก่อน`, 409);
-          case "daily_limit":
-            return again(`คุณเริ่มบันทึกครบ ${limits.MEET_MAX_DAILY_PER_USER} ครั้งใน 24 ชั่วโมงแล้ว ซึ่งเป็นจำนวนสูงสุดต่อคน กรุณาลองใหม่ภายหลัง`, 429);
           case "busy":
             return again(`ตอนนี้บันทึก Google Meet อยู่ ${MAX_MEET_RECORDINGS} ห้องแล้ว ซึ่งเป็นจำนวนสูงสุด กรุณาลองใหม่เมื่อห้องใดห้องหนึ่งจบ`, 503);
         }

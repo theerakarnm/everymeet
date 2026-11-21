@@ -59,10 +59,6 @@ const schema = z.object({
   MEET_MAX_DURATION_MIN: z.coerce.number().positive().max(360).default(240),
   /** Made an active admin of the Google Meet page at every boot; required when Meet recording is on. Set it only in .env, never in the code. */
   SEED_ADMIN_EMAIL: z.preprocess(blank, z.email().optional()).transform((v) => v?.toLowerCase()),
-  /** How many Google Meet recordings one person may run at the same time (web and calendar together). */
-  MEET_MAX_ACTIVE_PER_USER: z.coerce.number().int().min(1).default(1),
-  /** How many Google Meet recordings one person may start in 24 hours (web and calendar together). */
-  MEET_MAX_DAILY_PER_USER: z.coerce.number().int().min(1).default(5),
   /** Login emails in 24 hours, to new and existing addresses together, so the Resend quota is left for the minutes. */
   MEET_LOGIN_MAIL_DAILY_CAP: z.coerce.number().int().min(1).default(300),
   /** The bot Google account people invite; it never gets the minutes. Needed for calendar starts. */

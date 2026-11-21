@@ -34,10 +34,6 @@ test("failure emails say why in Thai and point to the web page", () => {
   assert.match(notRecordedMail({ title: "t", code: "abc-defg-hij" }).text, /หยุดทำงานโดยไม่คาดคิด/);
   assert.ok(expired.text.includes("https://meet.example.com/meet"));
   assert.match(calendarRefusedMail({ title: "Weekly standup", code: "abc-defg-hij", reason: "busy" }).text, /2 ห้องแล้ว/);
-  const daily = calendarRefusedMail({ title: "Weekly standup", code: "abc-defg-hij", reason: "daily_limit" });
-  assert.match(daily.text, /ครบ 5 ครั้งใน 24 ชั่วโมง/);
-  assert.ok(!daily.text.includes("/meet"), "no web-page button when the person's own limit refused it");
-  assert.match(calendarRefusedMail({ title: "t", code: "abc-defg-hij", reason: "user_busy" }).text, /อยู่ 1 ห้อง ซึ่งเป็นจำนวนสูงสุดต่อคน/);
 });
 
 test("the login email holds the link once and says how long it works", () => {
