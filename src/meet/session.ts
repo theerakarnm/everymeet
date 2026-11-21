@@ -10,7 +10,8 @@ import { MEET_PARTICIPANT_ID, type RecordingState, type RecordingStatus } from "
 import { recorder } from "./recorder-client.js";
 
 const log = logger("meet");
-const TICK_MS = 15_000;
+/** As often as the container reports (meet/bot/runner.ts), so the web page shows a state at most about 10 s old. */
+const TICK_MS = 5_000;
 /**
  * While the recorder is unreachable the bot keeps polling; it gives up only this long after the recorder's
  * own hard deadline (admit timeout + max duration + 10 min), when the recorder must have ended.

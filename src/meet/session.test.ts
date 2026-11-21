@@ -79,10 +79,10 @@ test("the recorder's state is followed quietly, and when everyone left the meeti
   const s = await h.start();
   const rec = remote(s.id);
   rec.status = { state: "waiting", segments: [] };
-  await advance(15_000);
-  assert.equal(s.state, "waiting");
+  await advance(5_000);
+  assert.equal(s.state, "waiting", "the web page shows the state, so it is polled every 5 s");
   rec.status = { state: "recording", captureStartedAt: NOW + 40_000, consentPosted: true, segments: [] };
-  await advance(15_000);
+  await advance(5_000);
   assert.equal(s.state, "recording");
   assert.equal(sentEmails.length, 0, "no email while things go well");
 
