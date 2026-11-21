@@ -1,6 +1,7 @@
 {
   "name": "meet-recorder",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "description": "Google Meet recorder for the meeting minutes bot: Cloudflare Worker, Durable Object and Playwright container",
   "engines": { "node": ">=22.12.0" },

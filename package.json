@@ -2,8 +2,9 @@
   "name": "meeting-minutes-bot",
   "version": "1.0.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
-  "description": "Discord bot that records voice meetings per speaker, transcribes them and posts Thai meeting minutes",
+  "description": "Self-hostable meeting minutes engine: records Discord voice channels and Google Meet calls, transcribes them, and writes Thai minutes",
   "engines": { "node": ">=22.12.0" },
   "scripts": {
     "dev": "tsx watch --env-file-if-exists=.env src/index.ts",

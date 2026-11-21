@@ -1,6 +1,8 @@
 # Meeting Minutes Bot
 
 Discord bot that records a voice channel per speaker, uploads the audio to Cloudflare R2, transcribes it with OpenRouter, writes Thai meeting minutes, and posts them to `#meeting-of-minutes` (or `#general`).
+This repo is the open-source engine (AGPL-3.0) that anyone can self-host.
+A hosted service may use it through the HTTP API.
 
 ## How it works
 
@@ -194,3 +196,13 @@ See [docs/api.md](docs/api.md) for the endpoints, the Recording object, errors, 
 - **Check the MAI-Transcribe 2 price unit.** OpenRouter lists its price as `0.1` without a clear unit. Run one short meeting and check `usage.cost` in the OpenRouter dashboard. If it turns out to be per request, raise `maxChunk` in `src/pipeline/plan.ts`.
 - **Consent / PDPA:** for Discord the bot announces recording in the command channel and the voice channel chat; for Google Meet it posts a notice in the Meet chat. Decide a retention period and set an R2 lifecycle rule accordingly.
 - Disk: up to ~170 MB per speaker-hour of temporary raw audio (silence is stored sparsely); removed after posting when `CLEANUP_LOCAL=true`.
+
+## License
+Copyright (C) 2026 The everymeet authors.
+This program is free software under the GNU Affero General Public License, version 3 only (`LICENSE`).
+If you run a modified version for others over a network, section 13 asks you to offer them your modified source; set `SOURCE_CODE_URL` to it (every page links it).
+The recorder Worker and container in `meet/` are part of the same program and the same license.
+Discord users reach the source through the playback page that every minutes post links, whose footer links `SOURCE_CODE_URL`.
+The Docker images include ffmpeg (Debian, GPL) and Chromium (in the Playwright base image) as separate programs under their own licenses.
+Programs that only call the HTTP API (`docs/api.md`) are separate works; do not import engine modules into them.
+Contributions are accepted under the same license with a DCO sign-off (CONTRIBUTING.md).
