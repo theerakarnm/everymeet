@@ -1,5 +1,6 @@
 import { Client, Events, GatewayIntentBits } from "discord.js";
 import { startOutbox } from "./api/outbox.js";
+import { startCalendarPoller } from "./calendar/poller.js";
 import { config } from "./config.js";
 import { activeSessions } from "./recorder/session.js";
 import { activeMeets, MeetSession, type StartMeet } from "./meet/session.js";
@@ -41,6 +42,7 @@ process.on("unhandledRejection", (err) => log.error("unhandled rejection", err))
 
 // Google Meet recordings run on Cloudflare and need no Discord login: re-attach them before anything can start a new one.
 await recoverUnfinished(client, "meet");
+if (c.CALENDAR_ICAL_URL) startCalendarPoller(startMeet);
 startOutbox();
 startWebServer({ startMeet });
 if (c.DISCORD_TOKEN) await client.login(c.DISCORD_TOKEN);

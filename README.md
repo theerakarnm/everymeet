@@ -91,7 +91,8 @@ meetings/<id>/summary-full.md, summary-short.md
 ## Google Meet recording
 
 Meet recording is optional.
-It stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set, and it then also needs `RESEND_API_KEY` and `EMAIL_FROM`.
+It stays off unless `MEET_RECORDER_URL` and `MEET_RECORDER_TOKEN` are both set.
+The `/meet` page and the calendar trigger also need `RESEND_API_KEY` and `EMAIL_FROM`; API recordings in webhook mode need neither.
 It does not use Discord at all.
 
 Two ways to start a recording (the calendar trigger is not built yet; this describes its planned behavior):
