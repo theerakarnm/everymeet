@@ -2,12 +2,13 @@ import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { getCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
-import { config, meetPageEnabled, SAMPLE_RATE } from "../config.js";
+import { apiEnabled, config, meetPageEnabled, SAMPLE_RATE } from "../config.js";
 import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { presign } from "../storage/r2.js";
 import { SESSION_ID_RE, signAccess, verifyAccess, verifyPin } from "../util/pin.js";
 import { bangkokDateTime, durationTh } from "../util/time.js";
+import { apiRoutes } from "../api/routes.js";
 import { totalSamples } from "../pipeline/assemble.js";
 import { logger } from "../util/log.js";
 import { clientIp } from "./client-ip.js";
@@ -176,6 +177,8 @@ export function createApp(deps: MeetRouteDeps): Hono {
 
   // Google Meet recording page; its routes run after the security-header middleware above.
   if (meetPageEnabled()) app.route("/meet", meetRoutes(deps));
+  // The HTTP API (docs/api.md); also under the security headers above.
+  if (apiEnabled()) app.route("/api/v1", apiRoutes(deps));
 
   app.notFound((c) => c.html(page.notFound(), 404));
   app.onError((err, c) => {
