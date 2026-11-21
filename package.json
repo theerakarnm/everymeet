@@ -12,7 +12,8 @@
     "start": "node --env-file-if-exists=.env dist/index.js",
     "register": "node --env-file-if-exists=.env dist/register-commands.js",
     "typecheck": "tsc -p tsconfig.test.json",
-    "test": "node --import tsx --experimental-test-module-mocks --test 'src/**/*.test.ts'"
+    "test": "node --import tsx --experimental-test-module-mocks --test 'src/**/*.test.ts'",
+    "licenses": "node scripts/check-licenses.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1149.0",
