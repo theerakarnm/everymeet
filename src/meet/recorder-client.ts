@@ -2,7 +2,6 @@ import { config } from "../config.js";
 import type { RecordingJob, RecordingStatus } from "./protocol.js";
 
 /** HTTPS client for the meet-recorder Worker (meet/worker). */
-export const meetRecorderConfigured = () => !!config().MEET_RECORDER_URL;
 
 async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<Response> {
   const c = config();

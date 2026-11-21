@@ -2,8 +2,7 @@ import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
 import { getCookie, setCookie } from "hono/cookie";
 import { HTTPException } from "hono/http-exception";
-import { config, SAMPLE_RATE } from "../config.js";
-import { meetRecorderConfigured } from "../meet/recorder-client.js";
+import { config, meetPageEnabled, SAMPLE_RATE } from "../config.js";
 import { loadRemote, meetingTitle, type Manifest } from "../storage/manifest.js";
 import { keys } from "../storage/keys.js";
 import { presign } from "../storage/r2.js";
@@ -176,7 +175,7 @@ export function createApp(deps: MeetRouteDeps): Hono {
   });
 
   // Google Meet recording page; its routes run after the security-header middleware above.
-  if (meetRecorderConfigured()) app.route("/meet", meetRoutes(deps));
+  if (meetPageEnabled()) app.route("/meet", meetRoutes(deps));
 
   app.notFound((c) => c.html(page.notFound(), 404));
   app.onError((err, c) => {

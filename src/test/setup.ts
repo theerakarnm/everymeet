@@ -34,6 +34,11 @@ Object.assign(process.env, {
   CALENDAR_ICAL_URL: "https://calendar.example.com/calendar/ical/bot/private-secret/basic.ics",
   RESEND_API_KEY: `re_${"e".repeat(40)}`,
   EMAIL_FROM: "minutes@example.com",
+  API_KEYS: `service:${"k".repeat(40)},ops:${"o".repeat(40)}`,
+  // The example secret of the Standard Webhooks specification: a public test value.
+  WEBHOOK_SECRET: "whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw",
+  WEBHOOK_URL: "https://service.example.com/hooks/everymeet",
+  WEBHOOK_ALLOWED_ORIGINS: "https://other.example.com",
 });
 
 /** Objects "uploaded" to R2, by key. */

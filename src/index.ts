@@ -41,4 +41,5 @@ process.on("unhandledRejection", (err) => log.error("unhandled rejection", err))
 // Google Meet recordings run on Cloudflare and need no Discord login: re-attach them before anything can start a new one.
 await recoverUnfinished(client, "meet");
 startWebServer({ startMeet });
-await client.login(c.DISCORD_TOKEN);
+if (c.DISCORD_TOKEN) await client.login(c.DISCORD_TOKEN);
+else log.info("Discord is off (DISCORD_TOKEN is not set)");

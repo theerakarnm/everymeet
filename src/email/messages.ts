@@ -1,4 +1,4 @@
-import { config, MEET_ADMIT_TIMEOUT_MS } from "../config.js";
+import { config, MEET_ADMIT_TIMEOUT_MS, meetPageEnabled } from "../config.js";
 import type { EndReason, RecordingEnd } from "../meet/protocol.js";
 import type { RefusalReason } from "../meet/session.js";
 import { bangkokDateTime, durationTh } from "../util/time.js";
@@ -115,7 +115,7 @@ export function notRecordedMail(o: { title: string; code: string; end?: Recordin
         why = `บันทึก${room}ไม่ได้ (${describeMeetEnd(o.end?.reason)})`;
     }
   }
-  return mail(`บันทึก Google Meet ไม่สำเร็จ - ${o.title}`, [why, { url: `${base()}/meet`, label: "เริ่มบันทึกใหม่" }]);
+  return mail(`บันทึก Google Meet ไม่สำเร็จ - ${o.title}`, [why, ...(meetPageEnabled() ? [{ url: `${base()}/meet`, label: "เริ่มบันทึกใหม่" }] : [])]);
 }
 
 export function consentMissingMail(o: { title: string; code: string }): Mail {
