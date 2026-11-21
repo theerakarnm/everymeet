@@ -5,18 +5,21 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ChannelType, Collection } from "discord.js";
-import { chatReply, dataDir, flush, mockOpenRouter, mockR2, r2, r2Text, type OpenRouterCall } from "../test/setup.js";
+import { chatReply, dataDir, flush, mockEmail, mockOpenRouter, mockR2, r2, r2Text, sentEmails, type OpenRouterCall } from "../test/setup.js";
 
 mockR2();
+let failEmailTo = (_to: string) => false;
+mockEmail({ fail: (to) => failEmailTo(to) });
 const { processMeeting, recoverUnfinished } = await import("./run.js");
-const { saveLocal, meetingDir } = await import("../storage/manifest.js");
-const { keys } = await import("../storage/r2.js");
+const { loadLocal, saveLocal, meetingDir } = await import("../storage/manifest.js");
+const { keys } = await import("../storage/keys.js");
 const { TrackWriter } = await import("../recorder/track-writer.js");
 const { SAMPLE_RATE, SEGMENT_SAMPLES } = await import("../config.js");
 const { verifyPin, newSessionId } = await import("../util/pin.js");
+const { pendingWebhooks } = await import("../api/outbox.js");
 
 const sec = (s: number) => Math.round(s * SAMPLE_RATE);
 const tone = (seconds: number, freq: number) => {
@@ -250,7 +253,9 @@ test("after a crash mid-meeting, the recording is closed at the last heartbeat a
   saveLocal(m as any);
   openRouter();
   const { client, posts } = discord(["meeting-of-minutes"]);
-  await recoverUnfinished(client);
+  await recoverUnfinished(client, "meet");
+  assert.equal(loadLocal(m.id)?.status, "recording", "Meet recovery leaves Discord meetings to the Discord login");
+  await recoverUnfinished(client, "discord");
   const deadline = performance.now() + 20_000;
   while (posts.length === 0 && performance.now() < deadline) await flush();
 
@@ -266,4 +271,158 @@ test("after a crash mid-meeting, the recording is closed at the last heartbeat a
     ["[00:00:01] Alice", "[00:00:05] Bob"],
     "everything up to the heartbeat is kept, nothing after it",
   );
+});
+
+/** A 20-second Google Meet recording stored only in R2 as FLAC, with speech at 1-4 s and 10-12 s unless `silent`. */
+function meetRecording(o: { silent?: boolean } = {}) {
+  const id = newSessionId();
+  const startedAt = Date.UTC(2026, 9, 12, 3, 0, 0);
+  const pcm = Buffer.alloc(sec(20) * 2);
+  if (!o.silent) {
+    tone(3, 440).copy(pcm, sec(1) * 2);
+    tone(2, 660).copy(pcm, sec(10) * 2);
+  }
+  const raw = join(dataDir, `${id}.raw`);
+  const flac = join(dataDir, `${id}.flac`);
+  writeFileSync(raw, pcm);
+  execFileSync("ffmpeg", ["-v", "error", "-f", "s16le", "-ar", String(SAMPLE_RATE), "-ac", "1", "-i", raw, "-c:a", "flac", flac]);
+  r2.set(keys.segment(id, "meet", 0), readFileSync(flac));
+  return {
+    id,
+    meet: {
+      url: "https://meet.google.com/abc-defg-hij",
+      code: "abc-defg-hij",
+      title: "Weekly standup",
+      trigger: "calendar" as const,
+      startedBy: "alice@planthia.test",
+      recipients: ["alice@planthia.test", "bob@example.com"],
+    },
+    startedAt,
+    endedAt: startedAt + 20_000,
+    heartbeatAt: startedAt + 20_000,
+    endReason: "การประชุม Google Meet จบแล้ว",
+    status: "processing" as const,
+    participants: { meet: { displayName: "เสียงรวมจาก Google Meet", utterances: [], segments: [0], uploaded: [0] } },
+  };
+}
+
+test("a Google Meet recording stored only in R2 gets speech detection, unnamed unjoined lines and no per-speaker track", async () => {
+  sentEmails.length = 0;
+  const m = meetRecording();
+  const id = m.id;
+  const calls = mockOpenRouter((call) => {
+    if (call.path === "/audio/transcriptions") {
+      return Response.json({
+        text: "",
+        segments: [
+          { start: 0.3, end: 3, text: "สวัสดีครับ เริ่มประชุม" },
+          { start: 4.3, end: 6, text: "Bob ช่วย deploy วันศุกร์" },
+        ],
+      });
+    }
+    return chatReply(call.body.max_tokens <= 2_000 ? SHORT : FULL);
+  });
+  const { client, posts } = discord(["meeting-of-minutes"]);
+  await processMeeting(client, m as any);
+
+  // Speech 0.8-4.2 s and 9.8-12.2 s (0.2 s padding) packed into one request: 3.4 s + 0.6 s gap + 2.4 s.
+  const stt = calls.filter((c) => c.path === "/audio/transcriptions");
+  assert.equal(stt.length, 1);
+  assert.ok(Math.abs(wavSeconds(stt[0]!) - 6.4) < 0.01, `${wavSeconds(stt[0]!)} s`);
+  const body = r2Text(keys.transcript(id))!.split("-".repeat(60))[1]!.trim().split("\n");
+  assert.deepEqual(body, ["[00:00:01] สวัสดีครับ เริ่มประชุม", "[00:00:10] Bob ช่วย deploy วันศุกร์"]);
+  const fullPrompt = calls.find((c) => c.path === "/chat/completions")!.body.messages.map((x: any) => x.content).join("\n");
+  assert.match(fullPrompt, /ไม่ได้ระบุว่าใครพูด/);
+
+  assert.ok(r2.has(keys.mixed(id)));
+  assert.ok(!r2.has(keys.track(id, "meet")), "no per-speaker file for a single mixed track");
+  const saved = manifestIn(id);
+  assert.equal(saved.status, "done");
+  assert.deepEqual(saved.outputs.tracks, {});
+  assert.deepEqual(saved.participants.meet.utterances, [
+    { start: sec(0.8), end: sec(4.2) },
+    { start: sec(9.8), end: sec(12.2) },
+  ]);
+  assert.equal(posts.length, 0, "a Meet recording posts nothing in Discord");
+  assert.deepEqual(sentEmails.map((e) => e.to), ["alice@planthia.test", "bob@example.com"]);
+  const mail = sentEmails[0]!;
+  assert.equal(mail.subject, "สรุปการประชุม - Weekly standup");
+  assert.ok(mail.text.includes(SHORT));
+  assert.ok(mail.text.includes(`https://meet.example.com/m/${id}`));
+  const pin = mail.text.match(/PIN: (\d{6})/)?.[1];
+  assert.ok(pin && verifyPin(pin, saved.pin.salt, saved.pin.hash), "the emailed PIN opens the page");
+  assert.match(fullPrompt, /Google Meet "Weekly standup"/);
+});
+
+test("a Meet minutes email that one recipient cannot get still reaches the others", async () => {
+  const m = meetRecording();
+  sentEmails.length = 0;
+  failEmailTo = (to) => to === "bob@example.com";
+  try {
+    mockOpenRouter((call) =>
+      call.path === "/audio/transcriptions"
+        ? Response.json({ text: "", segments: [{ start: 0.3, end: 3, text: "สวัสดีครับ" }] })
+        : chatReply(call.body.max_tokens <= 2_000 ? SHORT : FULL),
+    );
+    await processMeeting(discord([]).client, m as any);
+  } finally {
+    failEmailTo = () => false;
+  }
+  assert.deepEqual(sentEmails.map((e) => e.to), ["alice@planthia.test"]);
+  assert.equal(manifestIn(m.id).status, "done");
+});
+
+test("a Meet recording where nobody spoke emails only the organizer", async () => {
+  const m = meetRecording({ silent: true });
+  sentEmails.length = 0;
+  const calls = mockOpenRouter(() => chatReply("unused"));
+  await processMeeting(discord([]).client, m as any);
+  assert.equal(calls.length, 0, "nothing to transcribe or summarize");
+  assert.deepEqual(sentEmails.map((e) => e.to), ["alice@planthia.test"]);
+  assert.match(sentEmails[0]!.text, /ไม่พบเสียงพูด/);
+  assert.equal(manifestIn(m.id).status, "done");
+});
+
+const apiMeet = (delivery: "email" | "webhook", o: { silent?: boolean } = {}) => {
+  const m = meetRecording(o);
+  const api = { client: "service", ownerId: "team-1", metadata: { plan: "pro" }, delivery, webhookUrl: "https://service.example.com/hooks/everymeet" };
+  return delivery === "webhook"
+    ? { ...m, meet: { ...m.meet, trigger: "api" as const, startedBy: undefined, recipients: [], api } }
+    : { ...m, meet: { ...m.meet, trigger: "api" as const, api } };
+};
+
+test("a Google Meet API recording in webhook mode emails nobody and queues minutes.ready with the short summary but no PIN", async () => {
+  const m = apiMeet("webhook");
+  sentEmails.length = 0;
+  mockOpenRouter((call) =>
+    call.path === "/audio/transcriptions"
+      ? Response.json({ text: "", segments: [{ start: 0.3, end: 3, text: "สวัสดีครับ" }] })
+      : chatReply(call.body.max_tokens <= 2_000 ? SHORT : FULL),
+  );
+  await processMeeting(discord([]).client, m as any);
+  assert.deepEqual(sentEmails, []);
+  assert.equal(manifestIn(m.id).status, "done");
+  const ready = pendingWebhooks().map((e) => JSON.parse(e.body)).find((b) => b.data.id === m.id && b.type === "minutes.ready")!;
+  assert.equal(ready.data.state, "done");
+  assert.equal(ready.data.summaryShort, SHORT);
+  assert.equal(ready.data.playbackUrl, `https://meet.example.com/m/${m.id}`);
+  assert.equal("pin" in ready.data, false);
+});
+
+test("a Google Meet API recording whose processing fails queues recording.failed and, in email mode, emails the starter", async () => {
+  const m = apiMeet("email");
+  sentEmails.length = 0;
+  mockOpenRouter((call) =>
+    call.path === "/audio/transcriptions"
+      ? Response.json({ text: "", segments: [{ start: 0.3, end: 3, text: "สวัสดีครับ" }] })
+      : new Response("bad request", { status: 400 }), // 4xx is not retried (src/pipeline/openrouter.ts withRetry), so both summary models fail at once
+  );
+  await processMeeting(discord([]).client, m as any);
+  assert.equal(manifestIn(m.id).status, "failed");
+  const failed = pendingWebhooks().map((e) => JSON.parse(e.body)).find((b) => b.data.id === m.id)!;
+  assert.equal(failed.type, "recording.failed");
+  assert.equal(failed.data.state, "failed");
+  assert.ok(failed.data.error);
+  assert.deepEqual(sentEmails.map((e) => e.to), ["alice@planthia.test"]);
+  assert.match(sentEmails[0]!.subject, /ประมวลผลบันทึกการประชุมไม่สำเร็จ/);
 });

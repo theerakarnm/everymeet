@@ -1,0 +1,26 @@
+{
+  "name": "meet-recorder",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "description": "Google Meet recorder for the meeting minutes bot: Cloudflare Worker, Durable Object and Playwright container",
+  "engines": { "node": ">=22.12.0" },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "test": "node --import tsx --test 'worker/**/*.test.ts' 'bot/**/*.test.ts'",
+    "build:bot": "esbuild bot/runner.ts bot/login.ts --bundle --platform=node --target=node22 --format=esm --external:playwright --outdir=dist --out-extension:.js=.mjs",
+    "image:local": "npm run build:bot && podman build -t meet-recorder:local .",
+    "meet:login": "npm run image:local && mkdir -p auth && podman run --rm -it -p 127.0.0.1:6080:6080 -v \"$PWD/auth:/out\" meet-recorder:local login"
+  },
+  "dependencies": {
+    "playwright": "1.64.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261028.1",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.28.2",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.154.0"
+  }
+}

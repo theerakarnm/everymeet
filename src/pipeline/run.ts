@@ -1,12 +1,18 @@
 import { rmSync } from "node:fs";
 import type { Client } from "discord.js";
+import { emitWebhook } from "../api/events.js";
 import { config, SAMPLE_RATE, SEGMENT_SAMPLES } from "../config.js";
-import { meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest } from "../storage/manifest.js";
-import { keys, putFile, putText } from "../storage/r2.js";
+import { sendEmail } from "../email/send.js";
+import { minutesMail, processingFailedMail } from "../email/messages.js";
+import { emailStarter, meetingDir, saveEverywhere, saveLocal, unfinishedLocal, type Manifest, type MeetManifest } from "../storage/manifest.js";
+import { keys } from "../storage/keys.js";
+import { putFile, putText } from "../storage/r2.js";
 import { generatePin, hashPin } from "../util/pin.js";
 import { pLimit } from "../util/limit.js";
 import { logger } from "../util/log.js";
-import { buildRawTracks, encodeTracks, mixTracks } from "./assemble.js";
+import { markMeetSpeech } from "../meet/speech.js";
+import { MeetSession } from "../meet/session.js";
+import { buildRawTracks, encodeTracks, mixTracks, totalSamples } from "./assemble.js";
 import { transcribeMeeting } from "./transcribe.js";
 import { fullSummary, shortSummary } from "./summarize.js";
 import { notifyFailure, publishMinutes } from "./publish.js";
@@ -25,9 +31,13 @@ async function run(client: Client, m: Manifest): Promise<void> {
   try {
     m.outputs ??= {};
 
+    // 0. A Google Meet recording is one mixed track without speech marks; find where people spoke.
+    if (m.meet) await markMeetSpeech(m);
+
     // 1. Audio: per-speaker tracks + one mixed file, all to R2.
     const raw = await buildRawTracks(m);
-    const tracks = await encodeTracks(raw);
+    // A Meet recording has a single mixed track, which meeting.mp3 already is.
+    const tracks = m.meet ? {} : await encodeTracks(raw);
     m.outputs.tracks = {};
     for (const [userId, path] of Object.entries(tracks)) {
       const key = keys.track(m.id, userId);
@@ -60,24 +70,38 @@ async function run(client: Client, m: Manifest): Promise<void> {
     m.outputs.summaryFull = keys.summaryFull(m.id);
     m.outputs.summaryShort = keys.summaryShort(m.id);
 
-    // 4. PIN + post to Discord. Only the hash is stored.
+    // 4. PIN, then the minutes: by email for Google Meet, in Discord otherwise. Only the hash is stored.
     const pin = generatePin();
     m.pin = hashPin(pin);
     await saveEverywhere(m);
 
     const notes: string[] = [];
-    if (m.recovered) notes.push("บอทรีสตาร์ทระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน");
+    if (m.recovered) {
+      notes.push(
+        m.meet
+          ? "บอท Google Meet หยุดทำงานระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน"
+          : "บอทรีสตาร์ทระหว่างประชุม เสียงช่วงท้ายอาจขาดหายไปบางส่วน",
+      );
+    }
     if (t.failedChunks > 0) notes.push(`ถอดเสียงไม่สำเร็จ ${t.failedChunks} จาก ${t.totalChunks} ช่วง`);
-    m.outputs.postedMessageUrl = await publishMinutes(client, m, {
-      pin,
-      shortSummary: short,
-      fullSummary: full,
-      transcript: t.text,
-      note: notes.join(" / ") || undefined,
-    });
+    const note = notes.join(" / ") || undefined;
+    if (m.meet) {
+      const starter = emailStarter(m);
+      // Webhook mode: the caller sends its own emails after minutes.ready. Nobody spoke: only the starter is told.
+      if (starter) await emailMinutes(m, t.lines.length > 0 ? m.meet.recipients : [starter], { pin, shortSummary: short, note });
+    } else {
+      m.outputs.postedMessageUrl = await publishMinutes(client, m, {
+        pin,
+        shortSummary: short,
+        fullSummary: full,
+        transcript: t.text,
+        note,
+      });
+    }
 
     m.status = "done";
     await saveEverywhere(m);
+    if (m.meet) emitWebhook(m, "minutes.ready", short);
     log.info(`done ${m.id} in ${Math.round((Date.now() - started) / 1000)}s`);
     if (config().CLEANUP_LOCAL) rmSync(meetingDir(m.id), { recursive: true, force: true });
   } catch (err) {
@@ -89,16 +113,58 @@ async function run(client: Client, m: Manifest): Promise<void> {
     } catch {
       saveLocal(m);
     }
-    await notifyFailure(client, m, m.error);
+    if (m.meet) {
+      const starter = emailStarter(m);
+      if (starter) {
+        await sendEmail({ to: starter, ...processingFailedMail({ id: m.id, title: m.meet.title, startedAt: m.startedAt, error: m.error }) })
+          .catch((e) => log.error(`could not email the failure of ${m.id}`, e));
+      }
+      emitWebhook(m, "recording.failed");
+    } else {
+      await notifyFailure(client, m, m.error);
+    }
   }
 }
 
 /**
- * After a crash or restart: meetings that were still recording are closed at
- * their last heartbeat and processed; meetings that were mid-processing are retried.
+ * Emails the minutes to each recipient on their own; fails only when nobody got them.
+ * No idempotency key: processing that is retried after a crash makes a new PIN, so a second email is the correct one.
  */
-export async function recoverUnfinished(client: Client): Promise<void> {
+async function emailMinutes(m: MeetManifest, recipients: string[], o: { pin: string; shortSummary: string; note?: string }): Promise<void> {
+  const mail = minutesMail({
+    id: m.id,
+    title: m.meet.title,
+    startedAt: m.startedAt,
+    seconds: totalSamples(m) / SAMPLE_RATE,
+    startedBy: m.meet.startedBy ?? "-",
+    endReason: m.endReason,
+    ...o,
+  });
+  let sent = 0;
+  for (const to of recipients) {
+    try {
+      await sendEmail({ to, ...mail });
+      sent++;
+    } catch (err) {
+      log.error(`minutes email for ${m.id} not sent`, err);
+    }
+  }
+  if (sent === 0) throw new Error("the minutes email could not be sent to anyone");
+  log.info(`${m.id}: minutes emailed to ${sent} of ${recipients.length}`);
+}
+
+/**
+ * After a crash or restart. Google Meet recordings ran on in the cloud and are re-attached; Discord recordings
+ * are closed at their last heartbeat. Meetings that were mid-processing are retried. Meet needs no Discord login,
+ * so boot runs "meet" first and "discord" once the client is ready.
+ */
+export async function recoverUnfinished(client: Client, source: "meet" | "discord"): Promise<void> {
   for (const m of unfinishedLocal()) {
+    if ((source === "meet") !== !!m.meet) continue;
+    if (m.meet && m.status === "recording") {
+      MeetSession.resume(m, (done) => void processMeeting(client, done));
+      continue;
+    }
     if (m.status === "recording") {
       log.warn(`recovering ${m.id}: recorder stopped unexpectedly, closing at last heartbeat`);
       m.endedAt = m.heartbeatAt;

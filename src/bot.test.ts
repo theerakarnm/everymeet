@@ -57,7 +57,7 @@ mock.module(new URL("./pipeline/run.js", import.meta.url).href, {
 
 const { handleInteraction, handleVoiceStateUpdate } = await import("./interactions.js");
 const { activeSessions } = await import("./recorder/session.js");
-const { keys } = await import("./storage/r2.js");
+const { keys } = await import("./storage/keys.js");
 const { SAMPLE_RATE } = await import("./config.js");
 
 // ---- a fake Discord server --------------------------------------------------
@@ -119,10 +119,11 @@ function makeServer() {
     voiceUpdate(m, voice.id, null);
   };
 
-  const command = async (name: "record" | "end", member: any) => {
+  const command = async (name: "record" | "end", member: any, options: Record<string, string> = {}) => {
     const replies: any[] = [];
     const i: any = {
       commandName: name,
+      options: { getString: (n: string) => options[n] ?? null },
       member,
       guild,
       guildId: guild.id,
@@ -205,6 +206,8 @@ beforeEach(() => {
 });
 afterEach(async () => {
   await Promise.all([...activeSessions.values()].map((s) => s.end("test cleanup")));
+  for (const s of activeSessions.values()) await s.shutdown();
+  activeSessions.clear();
   mock.timers.reset();
 });
 

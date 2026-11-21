@@ -235,3 +235,27 @@ test("transcription: falls back to the second model and maps segment times to th
     globalThis.fetch = realFetch;
   }
 });
+
+test("a Google Meet transcript names no speakers in its lines", () => {
+  const m: any = {
+    startedAt: 0,
+    endedAt: 60_000,
+    heartbeatAt: 0,
+    meet: {
+      url: "https://meet.google.com/abc-defg-hij",
+      code: "abc-defg-hij",
+      title: "Weekly standup",
+      trigger: "web",
+      startedBy: "alice@example.com",
+      recipients: ["alice@example.com"],
+    },
+    participants: { meet: { displayName: "เสียงรวมจาก Google Meet", utterances: [], segments: [], uploaded: [] } },
+  };
+  const t = formatTranscript(m, [
+    { userId: "meet", start: sec(1), text: "สวัสดีครับ" },
+    { userId: "meet", start: sec(3), text: "สวัสดีค่ะ" },
+  ]);
+  assert.match(t, /การประชุม: Weekly standup \(Google Meet abc-defg-hij\)/);
+  assert.match(t, /ผู้พูด: เสียงรวมจาก Google Meet/);
+  assert.match(t, /\n\[00:00:01\] สวัสดีครับ\n\[00:00:03\] สวัสดีค่ะ\n/);
+});

@@ -9,3 +9,8 @@ rust/spikes/**/spike-out/
 secrets/
 meet/auth/meet-auth.json
 meet/auth/recorder-token
+# Local env files of any name; only the example is tracked
+.env.*
+!.env.example
+# Exploration code, kept locally only
+spike/

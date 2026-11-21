@@ -1,7 +1,9 @@
 import { mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { config } from "../config.js";
-import { getText, keys, putText } from "./r2.js";
+import type { EndReason } from "../meet/protocol.js";
+import { keys } from "./keys.js";
+import { getText, putText } from "./r2.js";
 
 export type MeetingStatus = "recording" | "processing" | "done" | "failed";
 
@@ -20,15 +22,9 @@ export interface Participant {
   uploaded: number[];
 }
 
-export interface Manifest {
+/** What every recording has, whatever started it. */
+interface ManifestBase {
   id: string;
-  guildId: string;
-  guildName: string;
-  voiceChannelId: string;
-  voiceChannelName: string;
-  /** Text channel where /record was used (fallback output + continue prompts). */
-  commandChannelId: string;
-  startedBy: { id: string; name: string };
   startedAt: number;
   endedAt?: number;
   endReason?: string;
@@ -49,6 +45,59 @@ export interface Manifest {
   error?: string;
 }
 
+/** A Discord voice channel recording; its minutes are posted in Discord. */
+export interface DiscordManifest extends ManifestBase {
+  meet?: undefined;
+  guildId: string;
+  guildName: string;
+  voiceChannelId: string;
+  voiceChannelName: string;
+  /** Text channel where /record was used (fallback output + continue prompts). */
+  commandChannelId: string;
+  startedBy: { id: string; name: string };
+}
+
+/** The API client and owner of a recording started over /api/v1. */
+export interface ApiOwner {
+  /** API client name from API_KEYS: the tenant boundary. */
+  client: string;
+  ownerId: string;
+  metadata: Record<string, string>;
+  /** "email": the engine emails as for web starts; "webhook": no email at all. */
+  delivery: "email" | "webhook";
+  /** Where this recording's webhooks go; none when unset. */
+  webhookUrl?: string;
+}
+
+/** Which Google Meet call is recorded, for whom, and who gets the minutes. */
+export interface MeetInfo {
+  url: string;
+  code: string;
+  /** The calendar event title, or "Google Meet <code>" for a start on the web page. */
+  title: string;
+  trigger: "calendar" | "web" | "api";
+  /** Calendar organizer, web starter, or the API's delivery.starter; failure emails go here. Absent only for API recordings in webhook mode. */
+  startedBy?: string;
+  /** Who gets the minutes by email: lowercase, unique, includes startedBy when set, never the bot account. */
+  recipients: string[];
+  api?: ApiOwner;
+}
+
+/** A Google Meet recording (one mixed track); its minutes are emailed unless it reports by webhook only. */
+export interface MeetManifest extends ManifestBase {
+  meet: MeetInfo;
+  /** Why it ended, for machines (the API); endReason is the Thai text for people. */
+  endCode?: EndReason | "recorder_lost";
+}
+
+/** Who gets failure and consent emails: the starter, unless the recording reports by webhook only. */
+export const emailStarter = (m: MeetManifest): string | undefined => (m.meet.api?.delivery === "webhook" ? undefined : m.meet.startedBy);
+
+export type Manifest = DiscordManifest | MeetManifest;
+
+/** Shown on the playback page and in the transcript header. */
+export const meetingTitle = (m: Manifest): string => (m.meet ? m.meet.title : m.voiceChannelName);
+
 export const meetingDir = (id: string) => join(config().DATA_DIR, "meetings", id);
 
 export function saveLocal(m: Manifest): void {
@@ -59,9 +108,13 @@ export function saveLocal(m: Manifest): void {
   renameSync(tmp, join(dir, "manifest.json")); // atomic replace
 }
 
+export async function saveRemote(m: Manifest): Promise<void> {
+  await putText(keys.manifest(m.id), JSON.stringify(m), "application/json");
+}
+
 export async function saveEverywhere(m: Manifest): Promise<void> {
   saveLocal(m);
-  await putText(keys.manifest(m.id), JSON.stringify(m), "application/json");
+  await saveRemote(m);
 }
 
 export function loadLocal(id: string): Manifest | undefined {

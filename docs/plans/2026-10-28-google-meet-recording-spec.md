@@ -13,7 +13,7 @@ Add Google Meet recording to the bot: a Discord slash command (e.g. /record-meet
   Container Chromium sometimes hits net::ERR_NETWORK_CHANGED on first goto; retry.
   Podman on macOS: /tmp not shared into the VM.
 - 15-min CF run: CPU mean 0.26 cores, RSS ~1.7 GB. ~$0.076/h standard-2.
-- Reference for CF Containers pattern: /Users/jametirakarn/Desktop/Theerakarnm/Cellar/src/worker/container/job-runner.ts (DO per job, container.start + exec, stdin payload for secrets, interceptOutboundHttp callbacks, alarms as deadline).
+- Reference for CF Containers pattern: <path-to>/Cellar/src/worker/container/job-runner.ts (DO per job, container.start + exec, stdin payload for secrets, interceptOutboundHttp callbacks, alarms as deadline).
   Vexa (Apache-2.0) at /tmp/meetbots/vexa; Attendee (ELv2, ideas only).
 
 ## Existing codebase facts to respect
@@ -51,7 +51,7 @@ Speaker attribution scope (decided above).
 5.
 How the session reaches the container per run, where it lives on the VPS.
 6.
-Testing strategy: pure units, Worker logic testable without Cloudflare, one manual E2E on https://meet.google.com/jku-cpry-bcg.
+Testing strategy: pure units, Worker logic testable without Cloudflare, one manual E2E on https://meet.google.com/abc-defg-hij.
 7.
 Deployment/operations: wrangler deploy from podman (digest pitfall, --provenance shim), secrets, cost guardrails (max_instances, lifetime deadline, destroy on finish).
 Keep it lean: no speculative generality, no fallbacks the user did not ask for (existing transcribe/summary fallbacks must keep working).

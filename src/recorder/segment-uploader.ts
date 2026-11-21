@@ -1,7 +1,8 @@
 import { existsSync, statSync, unlinkSync } from "node:fs";
 import { ffmpeg, rawInput } from "../util/ffmpeg.js";
 import { logger } from "../util/log.js";
-import { keys, putFile } from "../storage/r2.js";
+import { keys } from "../storage/keys.js";
+import { putFile } from "../storage/r2.js";
 import { saveEverywhere, type Manifest } from "../storage/manifest.js";
 
 const log = logger("segments");

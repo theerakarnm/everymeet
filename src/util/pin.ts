@@ -40,3 +40,19 @@ export function verifyAccess(sessionId: string, value: string | undefined, secre
   const given = Buffer.from(mac, "base64url");
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
+
+/**
+ * Signed login cookie for the Google Meet page: "<email base64url>.<expiresAt>.<hmac>". The HMAC covers
+ * "user:<email>", which can never equal a meeting id, so a playback cookie never works here and vice versa.
+ */
+export function signUser(email: string, secret: string, ttlMs: number): string {
+  return `${Buffer.from(email, "utf8").toString("base64url")}.${signAccess(`user:${email}`, secret, ttlMs)}`;
+}
+
+/** The email in a valid, unexpired login cookie. */
+export function verifyUser(value: string | undefined, secret: string): string | undefined {
+  const dot = value?.indexOf(".") ?? -1;
+  if (!value || dot <= 0) return undefined;
+  const email = Buffer.from(value.slice(0, dot), "base64url").toString("utf8");
+  return verifyAccess(`user:${email}`, value.slice(dot + 1), secret) ? email : undefined;
+}

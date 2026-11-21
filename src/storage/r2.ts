@@ -1,7 +1,7 @@
 import { createReadStream, createWriteStream, statSync } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import type { Readable } from "node:stream";
-import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { config } from "../config.js";
 
@@ -18,17 +18,6 @@ function s3(): S3Client {
   }
   return client;
 }
-
-export const keys = {
-  manifest: (id: string) => `meetings/${id}/manifest.json`,
-  segment: (id: string, userId: string, index: number) =>
-    `meetings/${id}/segments/${userId}/${String(index).padStart(4, "0")}.flac`,
-  track: (id: string, userId: string) => `meetings/${id}/tracks/${userId}.ogg`,
-  mixed: (id: string) => `meetings/${id}/meeting.mp3`,
-  transcript: (id: string) => `meetings/${id}/transcript.txt`,
-  summaryFull: (id: string) => `meetings/${id}/summary-full.md`,
-  summaryShort: (id: string) => `meetings/${id}/summary-short.md`,
-};
 
 export async function putFile(key: string, path: string, contentType: string): Promise<void> {
   await s3().send(
@@ -74,4 +63,15 @@ export function presign(key: string, downloadName?: string, seconds = 600): Prom
     }),
     { expiresIn: seconds },
   );
+}
+
+/** One page of keys under `prefix` in key order; pass the returned cursor to continue. */
+export async function listKeys(prefix: string, limit: number, cursor?: string): Promise<{ keys: string[]; cursor?: string }> {
+  const res = await s3().send(
+    new ListObjectsV2Command({ Bucket: config().R2_BUCKET, Prefix: prefix, MaxKeys: limit, ContinuationToken: cursor }),
+  );
+  return {
+    keys: (res.Contents ?? []).map((o) => o.Key).filter((k): k is string => !!k),
+    cursor: res.IsTruncated ? res.NextContinuationToken : undefined,
+  };
 }

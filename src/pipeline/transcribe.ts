@@ -68,7 +68,8 @@ export async function transcribeMeeting(m: Manifest, rawTracks: Record<string, s
     }
   }
 
-  const lines = mergeLines((await Promise.all(jobs)).flat());
+  // One mixed Meet track holds several voices, so its lines are never joined into one speaker's paragraph.
+  const lines = mergeLines((await Promise.all(jobs)).flat(), m.meet ? 0 : undefined);
   return { lines, text: formatTranscript(m, lines), modelsUsed: [...models], failedChunks: failed, totalChunks: total };
 }
 
@@ -80,14 +81,17 @@ export function formatTranscript(m: Manifest, lines: Line[]): string {
   const speakers = [...new Set(lines.map((l) => speakerName(m, l.userId)))];
   const header = [
     `บันทึกการถอดเสียงการประชุม (Transcript)`,
-    `เซิร์ฟเวอร์: ${m.guildName}`,
-    `ห้องเสียง: ${m.voiceChannelName}`,
+    ...(m.meet ? [`การประชุม: ${m.meet.title} (Google Meet ${m.meet.code})`] : [`เซิร์ฟเวอร์: ${m.guildName}`, `ห้องเสียง: ${m.voiceChannelName}`]),
     `เริ่ม: ${bangkokDateTime(m.startedAt)} | ระยะเวลา: ${durationTh(totalSamples(m) / SAMPLE_RATE)}`,
     `ผู้พูด: ${speakers.join(", ") || "-"}`,
     "",
     "-".repeat(60),
     "",
   ];
-  const body = lines.map((l) => `[${hms(l.start / SAMPLE_RATE)}] ${speakerName(m, l.userId)}: ${l.text}`);
+  const body = lines.map((l) =>
+    m.meet
+      ? `[${hms(l.start / SAMPLE_RATE)}] ${l.text}`
+      : `[${hms(l.start / SAMPLE_RATE)}] ${speakerName(m, l.userId)}: ${l.text}`,
+  );
   return [...header, ...body, ""].join("\n");
 }

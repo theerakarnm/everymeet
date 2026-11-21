@@ -1,3 +1,6 @@
+import { config } from "../config.js";
+import type { RecordingState } from "../meet/protocol.js";
+
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]!);
 
@@ -12,8 +15,25 @@ main{max-width:560px;margin:0 auto;padding:48px 16px}
 h1{font-size:24px;margin:0 0 4px;word-break:break-word}
 .meta{color:var(--muted);font-size:14px;margin:0 0 24px}
 label{display:block;font-size:14px;margin-bottom:8px}
-input{width:100%;font:inherit;font-size:28px;letter-spacing:.4em;text-align:center;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text)}
-input:focus{outline:2px solid var(--accent);outline-offset:1px}
+input,textarea{width:100%;font:inherit;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text)}
+input:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+input.pin{font-size:28px;letter-spacing:.4em;text-align:center}
+textarea{resize:vertical}
+label.next{margin-top:16px}
+.hint{color:var(--muted);font-size:13px;margin:6px 0 0}
+.meta a,.refresh{color:var(--accent)}
+.refresh{display:inline-block;margin-top:12px;font-size:14px}
+li.rec{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:12px;padding:12px 2px}
+li.rec small{display:block;color:var(--muted);font-size:13px}
+li.rec form{flex:none}
+li.rec>div{flex:1 1 240px;min-width:0}
+.state{display:flex;align-items:flex-start;gap:8px;margin:4px 0 2px;font-size:14px;font-weight:600}
+.steps{display:inline-flex;gap:4px;flex:none;margin-top:7px}
+.steps i{width:8px;height:8px;border-radius:50%;border:1.5px solid var(--accent)}
+.steps i.on{background:var(--accent)}
+button.stop{width:auto;margin:0;padding:8px 14px;background:transparent;color:var(--err);border:1px solid var(--err)}
+form.inline{display:inline}
+button.link{width:auto;margin:12px 0 0;padding:0;background:none;border-radius:0;color:var(--accent);font-size:14px;font-weight:400;text-decoration:underline}
 button{margin-top:16px;width:100%;font:inherit;font-weight:600;padding:12px;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);cursor:pointer}
 .err{color:var(--err);font-size:14px;margin:12px 0 0}
 audio{width:100%;margin:8px 0 20px}
@@ -23,14 +43,48 @@ li{border-bottom:1px solid var(--line)}
 li a{display:flex;justify-content:space-between;gap:12px;padding:12px 2px;color:var(--text);text-decoration:none}
 li a:hover{color:var(--accent)}
 li span{color:var(--muted);font-size:13px;white-space:nowrap}
+footer{text-align:center;margin-top:16px;font-size:12px;color:var(--muted)}footer a{color:var(--muted)}
 `;
 
-function shell(title: string, body: string): string {
+function shell(title: string, body: string, head = ""): string {
   return `<!doctype html><html lang="th"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="robots" content="noindex,nofollow"><title>${esc(title)}</title>
+<meta name="robots" content="noindex,nofollow">${head}<title>${esc(title)}</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600&display=swap">
-<style>${STYLE}</style></head><body><main>${body}</main></body></html>`;
+<style>${STYLE}</style></head><body><main>${body}<footer><a href="${esc(config().SOURCE_CODE_URL)}">ซอร์สโค้ด</a> · AGPL-3.0</footer></main></body></html>`;
 }
+
+/** One Google Meet recording as the recorder page lists it. */
+export interface MeetRecordingView {
+  id: string;
+  title: string;
+  code: string;
+  state: RecordingState;
+  trigger: "calendar" | "web" | "api";
+  startedBy: string;
+  stopping: boolean;
+}
+
+/** Which of the three steps (prepare the bot, get into the room, record) each state is, and what to expect. */
+const STATE: Record<RecordingState, { step: number; text: string }> = {
+  starting: { step: 1, text: "ขั้นที่ 1 จาก 3: กำลังเตรียมบอท (ประมาณ 1 นาที)" },
+  joining: { step: 2, text: "ขั้นที่ 2 จาก 3: บอทกำลังขอเข้าห้อง" },
+  waiting: { step: 2, text: "ขั้นที่ 2 จาก 3: รอผู้จัดกดอนุญาตให้บอทเข้าห้อง" },
+  recording: { step: 3, text: "ขั้นที่ 3 จาก 3: กำลังบันทึกอยู่ในห้อง" },
+  ended: { step: 3, text: "จบแล้ว กำลังสรุปการประชุม" },
+};
+
+const stateLine = (r: MeetRecordingView) => {
+  if (r.stopping) return `<p class="state">กำลังหยุด</p>`;
+  const { step, text } = STATE[r.state];
+  const dots = [1, 2, 3].map((n) => (n <= step ? `<i class="on"></i>` : "<i></i>")).join("");
+  return `<p class="state"><span class="steps" aria-hidden="true">${dots}</span>${text}</p>`;
+};
+
+const meetCard = (title: string, body: string, head = "") =>
+  shell(title, `<div class="card"><p class="eyebrow">บันทึก Google Meet</p>${body}</div>`, head);
+
+/** States in which the page reloads itself, so people see the bot get into the room without pressing refresh. */
+const SETTLING: ReadonlySet<RecordingState> = new Set(["starting", "joining", "waiting"]);
 
 export const page = {
   notFound: () =>
@@ -43,10 +97,10 @@ export const page = {
     shell(
       "ใส่ PIN",
       `<div class="card"><p class="eyebrow">บันทึกการประชุม</p><h1>${esc(o.title)}</h1>
-<p class="meta">ใส่ PIN 6 หลักที่บอทส่งไว้ในข้อความ Discord</p>
+<p class="meta">ใส่ PIN 6 หลักที่บอทส่งมาพร้อมลิงก์นี้</p>
 <form method="post" action="/m/${esc(o.id)}" autocomplete="off">
 <label for="pin">PIN</label>
-<input id="pin" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus>
+<input id="pin" class="pin" name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" required autofocus>
 ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <button type="submit">เปิดบันทึก</button></form></div>`,
     ),
@@ -74,6 +128,75 @@ ${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
 <li><a href="${base}/transcript">Transcript ทั้งหมด<span>.txt</span></a></li>
 </ul>
 ${tracks ? `<h2>เสียงแยกรายคน</h2><ul>${tracks}</ul>` : ""}</div>`,
+    );
+  },
+
+  meetLogin: (o: { error?: string; email?: string }) =>
+    meetCard(
+      "เข้าสู่ระบบ",
+      `<h1>เข้าสู่ระบบ</h1>
+<p class="meta">ใส่อีเมลของคุณ แล้วบอทจะส่งลิงก์เข้าสู่ระบบไปให้ ถ้าอีเมลนี้ได้รับอนุญาตให้ใช้งาน ลิงก์ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว</p>
+<form method="post" action="/meet/login">
+<label for="email">อีเมล</label>
+<input id="email" name="email" type="email" autocomplete="email" required autofocus value="${esc(o.email ?? "")}">
+${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
+<button type="submit">ส่งลิงก์เข้าสู่ระบบ</button></form>`,
+    ),
+
+  meetLoginSent: () =>
+    meetCard(
+      "ตรวจอีเมลของคุณ",
+      `<h1>ตรวจอีเมลของคุณ</h1><p class="meta">ถ้าอีเมลนี้ใช้งานได้ ลิงก์เข้าสู่ระบบจะไปถึงภายในไม่กี่นาที ลิงก์ใช้ได้ 15 นาทีและใช้ได้ครั้งเดียว</p>`,
+    ),
+
+  meetConfirm: (o: { token: string }) =>
+    meetCard(
+      "ยืนยันการเข้าสู่ระบบ",
+      `<h1>ยืนยันการเข้าสู่ระบบ</h1><p class="meta">กดปุ่มด้านล่างเพื่อเข้าสู่ระบบในเบราว์เซอร์นี้</p>
+<form method="post" action="/meet/auth"><input type="hidden" name="t" value="${esc(o.token)}">
+<button type="submit">เข้าสู่ระบบ</button></form>`,
+    ),
+
+  meetLinkInvalid: () =>
+    meetCard(
+      "ลิงก์ใช้ไม่ได้",
+      `<h1>ลิงก์ใช้ไม่ได้</h1><p class="meta">ลิงก์หมดอายุหรือถูกใช้ไปแล้ว <a href="/meet">ขอลิงก์ใหม่</a></p>`,
+    ),
+
+  meetRecorder: (o: {
+    email: string;
+    recordings: MeetRecordingView[];
+    error?: string;
+    values?: { url: string; emails: string };
+  }) => {
+    const items = o.recordings
+      .map(
+        (r) => `<li class="rec"><div>${esc(r.title)}${stateLine(r)}<small>${esc(r.code)} · ${
+          r.trigger === "calendar" ? "จากปฏิทิน" : r.trigger === "api" ? "จาก API" : "จากหน้าเว็บ"
+        } · เริ่มโดย ${esc(r.startedBy)}</small></div>${
+          r.stopping || r.state === "ended"
+            ? ""
+            : `<form method="post" action="/meet/stop"><input type="hidden" name="id" value="${esc(r.id)}"><button class="stop" type="submit">หยุดบันทึก</button></form>`
+        }</li>`,
+      )
+      .join("");
+    return meetCard(
+      "บันทึก Google Meet",
+      `<h1>บันทึก Google Meet</h1>
+<p class="meta">เข้าสู่ระบบเป็น ${esc(o.email)} วางลิงก์ Google Meet แล้วกดเริ่มบันทึก บอทจะเข้าห้องและส่งบันทึกการประชุมทางอีเมลเมื่อการประชุมจบ</p>
+<form method="post" action="/meet/start" autocomplete="off">
+<label for="url">ลิงก์ Google Meet</label>
+<input id="url" name="url" type="text" inputmode="url" placeholder="https://meet.google.com/abc-defg-hij" required value="${esc(o.values?.url ?? "")}">
+<label for="emails" class="next">ส่งบันทึกให้อีเมลเพิ่มเติม (ไม่บังคับ)</label>
+<textarea id="emails" name="emails" rows="3" placeholder="name@example.com">${esc(o.values?.emails ?? "")}</textarea>
+<p class="hint">คั่นด้วยจุลภาคหรือขึ้นบรรทัดใหม่ บันทึกจะส่งถึงคุณเสมอ</p>
+${o.error ? `<p class="err">${esc(o.error)}</p>` : ""}
+<button type="submit">เริ่มบันทึก</button></form>
+<h2>การบันทึกของคุณ</h2>
+${items ? `<ul>${items}</ul>` : `<p class="meta">ยังไม่มีการบันทึกที่กำลังทำงาน</p>`}
+<a class="refresh" href="/meet">รีเฟรชสถานะ</a> · <form class="inline" method="post" action="/meet/logout"><button class="link" type="submit">ออกจากระบบ</button></form>`,
+      // Not over an error: the reload would drop the message and what was typed.
+      !o.error && o.recordings.some((r) => SETTLING.has(r.state)) ? `<meta http-equiv="refresh" content="5">` : "",
     );
   },
 };

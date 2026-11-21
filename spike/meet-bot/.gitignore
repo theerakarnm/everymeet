@@ -1,6 +1,0 @@
-auth/
-out/
-runs/
-node_modules/
-*.png
-cf/wrangler.deploy.jsonc

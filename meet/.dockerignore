@@ -1,0 +1,7 @@
+# Allowlist: only what the image needs. auth/ holds a real Google session and must never be sent.
+*
+!package.json
+!package-lock.json
+!dist/runner.mjs
+!dist/login.mjs
+!entrypoint.sh
